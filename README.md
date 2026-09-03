@@ -115,14 +115,3 @@ npm run dev
 ```
 *   **Frontend**: `http://localhost:5173`
 *   **Backend Server**: `http://localhost:5000`
-
----
-
-## 🧑‍🍳 Default Demo Credentials
-
-*   **Canteen Admin**:
-    *   Email: `drsce232105@gmail.com`
-    *   Password: `drsce@232105`
-*   **Student User**:
-    *   Email: `sakthivel.june03@gmail.com`
-    *   Password: `123456`

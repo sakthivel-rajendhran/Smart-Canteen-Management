@@ -283,16 +283,6 @@ const Login = () => {
               {submitting ? 'Authenticating...' : activeTab === 'login' ? 'Login →' : 'Create Account →'}
             </button>
           </form>
-
-          {/* Seed demo credential indicators */}
-          <div className="mt-8 pt-6 border-t border-border bg-primary-light/40 border-dashed rounded-2xl p-4.5 text-xs text-primary-dark leading-relaxed">
-            <strong className="block text-[10px] tracking-wider uppercase text-primary font-black mb-1.5">💡 Demo Accounts</strong>
-            <div className="grid grid-cols-1 gap-1 font-medium">
-              <div>👨‍🍳 Admin: <code className="font-mono bg-white px-1 py-0.5 rounded border border-primary/10">sakthiadmin@gmail.com</code> / <code className="font-mono bg-white px-1 py-0.5 rounded border border-primary/10">Sakthi@2004</code></div>
-              <div>🧑‍🎓 Student: <code className="font-mono bg-white px-1 py-0.5 rounded border border-primary/10">sakthivel.june03@gmail.com</code> / <code className="font-mono bg-white px-1 py-0.5 rounded border border-primary/10">123456</code></div>
-            </div>
-          </div>
-
         </div>
       </div>
     </div>
