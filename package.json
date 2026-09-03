@@ -1,0 +1,19 @@
+{
+  "name": "drs-quick-serve",
+  "version": "1.0.0",
+  "description": "Smart Canteen Management System",
+  "main": "backend/server.js",
+  "scripts": {
+    "install-all": "npm install && cd frontend && npm install && cd ../backend && npm install",
+    "frontend": "cd frontend && npm run dev",
+    "backend": "cd backend && npm run dev",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "seed": "cd backend && npm run seed",
+    "migrate-images": "cd backend && npm run migrate-images",
+    "test:apis": "cd backend && npm run test:apis"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
