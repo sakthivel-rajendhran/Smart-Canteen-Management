@@ -18,7 +18,7 @@
 8. [End-to-End Order & Payment Workflow](#8-end-to-end-order--payment-workflow)
 9. [Security, Authentication & Authorization](#9-security-authentication--authorization)
 10. [Comprehensive API Endpoints Matrix](#10-comprehensive-api-endpoints-matrix)
-11. [Deployment, Testing & Environment Configuration](#11-deployment-testing--environment-configuration)
+11. [Deployment & Testing](#11-deployment--testing)
 
 ---
 
@@ -476,7 +476,7 @@ All **43 endpoints** have been verified and automated in the test suite:
 
 ---
 
-## 11. Deployment, Testing & Environment Configuration
+## 11. Deployment & Testing
 
 ### Quick Start Commands:
 

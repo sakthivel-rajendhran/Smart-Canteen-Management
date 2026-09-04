@@ -60,37 +60,10 @@ drs-quick-serve/
 
 ---
 
-## ⚙️ Installation & Environment Setup
+## ⚙️ Installation & Setup
 
 ### 1. Database & Local Setup
 Ensure you have [Node.js](https://nodejs.org/) (v16+) and [MongoDB](https://www.mongodb.com/) installed locally, or set up a MongoDB Atlas cluster.
-
-### 2. Environment Variables Configuration
-Configure the following variables:
-
-#### Backend configuration (`backend/.env`)
-Create a `.env` file inside the `backend/` directory:
-```env
-PORT=5000
-MONGO_URI=mongodb://localhost:27017/drs_quick_serve
-JWT_SECRET=supersecretjwtkeydrsquickserve12345
-CLIENT_URL=http://localhost:5173
-
-# Razorpay Keys
-RAZORPAY_KEY_ID=rzp_test_SYSh7FU8tidKTo
-RAZORPAY_KEY_SECRET=your_razorpay_secret_here
-
-# Cloudinary Storage
-CLOUDINARY_CLOUD_NAME=your_cloudinary_name
-CLOUDINARY_API_KEY=your_cloudinary_key
-CLOUDINARY_API_SECRET=your_cloudinary_secret
-```
-
-#### Frontend configuration (`frontend/.env`)
-Create a `.env` file inside the `frontend/` directory:
-```env
-VITE_API_URL=http://localhost:5000/api
-```
 
 ---
 
