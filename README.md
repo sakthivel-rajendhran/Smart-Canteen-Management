@@ -86,5 +86,4 @@ Boot both client and server servers simultaneously:
 ```bash
 npm run dev
 ```
-*   **Frontend**: `http://localhost:5173`
-*   **Backend Server**: `http://localhost:5000`
+*   **App Url**: `https://smart-canteen-management-two.vercel.app/`
