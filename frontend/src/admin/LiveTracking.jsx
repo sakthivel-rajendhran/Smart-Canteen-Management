@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import io from 'socket.io-client';
-import API from '../services/api';
+import API, { getSocketUrl } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import {
   Activity,
@@ -66,7 +66,7 @@ const LiveTracking = () => {
     fetchActiveOrders();
 
     // Initialize Socket.IO connection with JWT authentication
-    const socketUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
+    const socketUrl = getSocketUrl();
     const socket = io(socketUrl, {
       auth: {
         token: user?.token,

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
-import API from '../services/api';
+import API, { getSocketUrl } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { 
   ClipboardList, 
@@ -51,7 +51,7 @@ const Tracker = () => {
     if (!order || !user) return;
 
     // Connect to Socket.IO Server with JWT authentication
-    const socketUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
+    const socketUrl = getSocketUrl();
     const socket = io(socketUrl, {
       auth: { token: user.token },
       withCredentials: true,
@@ -130,8 +130,6 @@ const Tracker = () => {
   const currentStepIndex = STATUS_ORDER.indexOf(currentStatus);
   const statusInfo = STATUS_INFO[currentStatus] || STATUS_INFO['Placed'];
 
-  // Fill percentage calculations for visual progress bar line
-  const fillPercentage = currentStepIndex < 0 ? 0 : Math.min(100, (currentStepIndex / (STEPS.length - 1)) * 100);
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10 pb-20">
@@ -191,23 +189,24 @@ const Tracker = () => {
           <p className="text-muted text-xs mb-8">Updates dynamically as canteen updates orders.</p>
 
           <div className="relative pl-2.5">
-            {/* Background Line */}
-            <div className="absolute left-7 top-6 bottom-6 w-0.5 bg-gray-100 z-0"></div>
-            
-            {/* Foreground Fill Line */}
-            <div 
-              className="absolute left-7 top-6 w-0.5 bg-gradient-to-b from-primary-darker to-primary z-10 transition-all duration-1000 ease-in-out"
-              style={{ height: `${fillPercentage}%` }}
-            ></div>
-
             <div className="flex flex-col gap-6">
               {STEPS.map((step, idx) => {
                 const done = idx < currentStepIndex;
                 const active = idx === currentStepIndex;
 
                 return (
-                  <div key={step.key} className="flex items-start gap-4.5 relative z-20">
-                    <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm font-bold transition-all duration-500 ${
+                  <div key={step.key} className="flex items-start gap-4.5 relative">
+                    {/* Connecting line to the next step marker (stops cleanly before the final Completed step) */}
+                    {idx < STEPS.length - 1 && (
+                      <div 
+                        className={`absolute left-[17px] w-0.5 z-0 transition-colors duration-500 pointer-events-none ${
+                          done ? 'bg-primary' : 'bg-gray-200'
+                        }`}
+                        style={{ top: '36px', bottom: '-24px' }}
+                      />
+                    )}
+
+                    <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm font-bold transition-all duration-500 relative z-10 flex-shrink-0 ${
                       done 
                         ? 'bg-primary border-primary text-white' 
                         : active 
@@ -263,9 +262,9 @@ const Tracker = () => {
             </div>
           )}
 
-          <div className="flex justify-between items-center pt-4 border-t border-primary-dark border-2">
-            <span className="font-outfit font-bold text-base text-primary-dark">Grand Total</span>
-            <span className="font-outfit font-black text-2xl text-primary-dark">₹{order.total}</span>
+          <div className="flex justify-between items-center gap-3 pt-4 mt-2 border-t border-border">
+            <span className="font-outfit font-bold text-base text-primary-dark min-w-0">Grand Total</span>
+            <span className="font-outfit font-black text-2xl text-primary-dark flex-shrink-0 whitespace-nowrap text-right">₹{order.total}</span>
           </div>
         </div>
       </div>

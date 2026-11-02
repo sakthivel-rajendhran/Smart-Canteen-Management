@@ -19,4 +19,15 @@ API.interceptors.request.use((config) => {
   return Promise.reject(error);
 });
 
+export const getSocketUrl = () => {
+  if (import.meta.env.VITE_SOCKET_URL) {
+    return import.meta.env.VITE_SOCKET_URL;
+  }
+  const apiUrl = import.meta.env.VITE_API_URL;
+  if (apiUrl && apiUrl.startsWith('http')) {
+    return apiUrl.replace(/\/api\/?$/, '');
+  }
+  return `${window.location.protocol}//${window.location.hostname}:5000`;
+};
+
 export default API;

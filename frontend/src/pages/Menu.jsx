@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import API from '../services/api';
+import API, { getSocketUrl } from '../services/api';
 import io from 'socket.io-client';
 import FoodCard from '../components/food/FoodCard';
 import FoodDetailModal from '../components/food/FoodDetailModal';
@@ -47,7 +47,7 @@ const Menu = () => {
     fetchData();
 
     // Setup Socket.IO for real-time menu synchronization
-    const socketUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
+    const socketUrl = getSocketUrl();
     const socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
     });

@@ -5,6 +5,13 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import { Server } from 'socket.io';
 
+import dns from 'dns';
+try {
+  dns.setServers(['8.8.8.8', '8.8.4.4']);
+} catch (e) {
+  // Ignore
+}
+
 dotenv.config();
 
 // Route files

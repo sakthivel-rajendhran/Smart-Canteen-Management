@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import dns from 'dns';
-// dns.setDefaultResultOrder('ipv4first');
+try {
+  dns.setServers(['8.8.8.8', '8.8.4.4']);
+} catch (e) {}
 import dotenv from 'dotenv';
 import User from '../models/User.js';
 import Category from '../models/Category.js';

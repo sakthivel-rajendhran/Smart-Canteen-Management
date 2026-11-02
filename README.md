@@ -86,4 +86,17 @@ Boot both client and server servers simultaneously:
 ```bash
 npm run dev
 ```
-*   **App Url**: `https://smart-canteen-management-two.vercel.app/`
+*   **Live Web App**: `https://smart-canteen-management-two.vercel.app/`
+*   **Local Frontend**: `http://localhost:5173`
+*   **Local Backend Server**: `http://localhost:5000`
+
+---
+
+## 🧑‍🍳 Default Demo Credentials
+
+*   **Canteen Admin**:
+    *   **Email**: `sakthiadmin@gmail.com`
+    *   **Password**: `Sakthi@2004`
+*   **Student User**:
+    *   **Email**: `sakthivel.june03@gmail.com`
+    *   **Password**: `123456`

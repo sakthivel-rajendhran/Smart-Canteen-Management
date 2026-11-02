@@ -2,6 +2,7 @@ import React, { createContext, useState, useEffect, useRef, useCallback } from '
 import io from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import notificationService from '../services/notificationService';
+import { getSocketUrl } from '../services/api';
 
 export const NotificationContext = createContext(null);
 
@@ -267,7 +268,7 @@ export const NotificationProvider = ({ children }) => {
     fetchNotifications();
 
     // Connect to Socket.IO server with JWT authentication
-    const socketUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
+    const socketUrl = getSocketUrl();
     const socket = io(socketUrl, {
       auth: {
         token: user.token,
