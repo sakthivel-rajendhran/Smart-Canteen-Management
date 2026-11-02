@@ -8,7 +8,13 @@ try {
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/drs_quick_serve');
+    const mongoUri = process.env.MONGO_URI;
+    if (!mongoUri) {
+      console.error('❌ MONGO_URI is not defined in environment variables!');
+      console.error('Please add MONGO_URI in your Render Dashboard -> Environment tab.');
+      process.exit(1);
+    }
+    const conn = await mongoose.connect(mongoUri);
     console.log(`MongoDB Database Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error(`MongoDB Connection Error: ${error.message}`);
