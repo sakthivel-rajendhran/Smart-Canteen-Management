@@ -14,7 +14,10 @@ import {
   LayoutDashboard, 
   FolderEdit, 
   Percent, 
-  BadgeIndianRupee 
+  BadgeIndianRupee,
+  Receipt,
+  Zap,
+  CheckCircle2
 } from 'lucide-react';
 import NotificationBell from '../notifications/NotificationBell';
 
@@ -60,12 +63,15 @@ const Navbar = () => {
 
   // Admin navigation items
   const adminNavItems = [
-    { label: 'Overview', path: '/admin', icon: <LayoutDashboard className="w-4 h-4" /> },
-    { label: 'Live Tracking', path: '/admin/live-tracking', icon: <ClipboardList className="w-4 h-4" /> },
-    { label: 'Manage Menu', path: '/admin/menu', icon: <Utensils className="w-4 h-4" /> },
-    { label: 'Categories', path: '/admin/categories', icon: <FolderEdit className="w-4 h-4" /> },
-    { label: 'Coupons', path: '/admin/coupons', icon: <Percent className="w-4 h-4" /> },
-    { label: 'Payments', path: '/admin/payments', icon: <BadgeIndianRupee className="w-4 h-4" /> }
+    { label: 'Overview', path: '/admin', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
+    { label: 'POS Billing', path: '/admin/pos', icon: <Zap className="w-3.5 h-3.5" /> },
+    { label: 'Live Queue', path: '/admin/live-tracking', icon: <ClipboardList className="w-3.5 h-3.5" /> },
+    { label: 'Handover', path: '/admin/handover', icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
+    { label: 'Bill Archive', path: '/admin/bills', icon: <Receipt className="w-3.5 h-3.5" /> },
+    { label: 'Menu', path: '/admin/menu', icon: <Utensils className="w-3.5 h-3.5" /> },
+    { label: 'Categories', path: '/admin/categories', icon: <FolderEdit className="w-3.5 h-3.5" /> },
+    { label: 'Coupons', path: '/admin/coupons', icon: <Percent className="w-3.5 h-3.5" /> },
+    { label: 'Payments', path: '/admin/payments', icon: <BadgeIndianRupee className="w-3.5 h-3.5" /> }
   ];
 
   const renderNavLinks = () => {
@@ -76,7 +82,7 @@ const Navbar = () => {
             <Link
               key={item.path}
               to={item.path}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
                 isActive(item.path)
                   ? 'bg-amber text-primary-darker shadow-md'
                   : 'text-white/80 hover:bg-white/10 hover:text-white'
@@ -86,14 +92,14 @@ const Navbar = () => {
               <span>{item.label}</span>
             </Link>
           ))}
-          <div className="ml-2">
+          <div className="ml-1">
             <NotificationBell isAdmin={true} />
           </div>
           <button
             onClick={handleLogout}
-            className="flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold text-white/50 hover:bg-red-950/20 hover:text-red-400 transition-all ml-2"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white/50 hover:bg-red-950/20 hover:text-red-400 transition-all ml-1"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-3.5 h-3.5" />
             <span>Logout</span>
           </button>
         </>

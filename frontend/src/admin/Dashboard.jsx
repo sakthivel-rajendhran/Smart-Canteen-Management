@@ -15,7 +15,10 @@ import {
   Layers,
   Percent,
   BadgeIndianRupee,
-  Activity
+  Activity,
+  Zap,
+  CheckCheck,
+  Receipt
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -175,12 +178,14 @@ const Dashboard = () => {
         </div>
 
         {/* Action Link Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 z-10 font-outfit">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 z-10 font-outfit">
           {[
-            { label: 'Live Tracking', path: '/admin/live-tracking', icon: <Layers className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
+            { label: 'POS Billing', path: '/admin/pos', icon: <Zap className="w-4.5 h-4.5" />, color: 'bg-amber text-stone-950 hover:bg-amber-light font-black' },
+            { label: 'Live Queue', path: '/admin/live-tracking', icon: <Layers className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
+            { label: 'Handover', path: '/admin/handover', icon: <CheckCheck className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
+            { label: 'Bill Archive', path: '/admin/bills', icon: <Receipt className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
             { label: 'Menu List', path: '/admin/menu', icon: <Utensils className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
-            { label: 'Promo Codes', path: '/admin/coupons', icon: <Percent className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
-            { label: 'Payments', path: '/admin/payments', icon: <BadgeIndianRupee className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' }
+            { label: 'Coupons', path: '/admin/coupons', icon: <Percent className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' }
           ].map((action, idx) => (
             <Link 
               key={idx}

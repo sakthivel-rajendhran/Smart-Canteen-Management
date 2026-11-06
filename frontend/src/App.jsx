@@ -34,6 +34,9 @@ const NotificationCenter = lazy(() => import('./pages/NotificationCenter'));
 const AdminDashboard = lazy(() => import('./admin/Dashboard'));
 const AdminOrders = lazy(() => import('./admin/Orders'));
 const LiveTracking = lazy(() => import('./admin/LiveTracking'));
+const POSBilling = lazy(() => import('./admin/POSBilling'));
+const FoodHandover = lazy(() => import('./admin/FoodHandover'));
+const BillHistory = lazy(() => import('./admin/BillHistory'));
 const MenuManagement = lazy(() => import('./admin/MenuManagement'));
 const Categories = lazy(() => import('./admin/Categories'));
 const Coupons = lazy(() => import('./admin/Coupons'));
@@ -111,6 +114,21 @@ function App() {
                       <Route path="/admin/orders" element={
                         <AdminRoute>
                           <LiveTracking />
+                        </AdminRoute>
+                      } />
+                      <Route path="/admin/pos" element={
+                        <AdminRoute>
+                          <POSBilling />
+                        </AdminRoute>
+                      } />
+                      <Route path="/admin/handover" element={
+                        <AdminRoute>
+                          <FoodHandover />
+                        </AdminRoute>
+                      } />
+                      <Route path="/admin/bills" element={
+                        <AdminRoute>
+                          <BillHistory />
                         </AdminRoute>
                       } />
                       <Route path="/admin/menu" element={

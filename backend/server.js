@@ -22,6 +22,7 @@ import couponRoutes from './routes/couponRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import posRoutes from './routes/posRoutes.js';
 
 // Error Handler Middleware
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
@@ -125,6 +126,7 @@ app.use('/api/coupons', couponRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin', posRoutes);
 
 // Health check API
 app.get('/', (req, res) => {

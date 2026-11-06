@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 import Order from '../models/Order.js';
 import MenuItem from '../models/MenuItem.js';
 import Coupon from '../models/Coupon.js';
@@ -102,9 +103,14 @@ const createOrder = async (req, res) => {
 
     const total = subtotal - discount;
     const orderCode = await generateOrderCode();
+    const pickupToken = orderCode.replace('DRS-', '');
+    const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
 
     const order = await Order.create({
       orderCode,
+      orderType: 'ONLINE',
+      pickupToken,
+      pickupSecret,
       user: req.user._id,
       items: verifiedItems,
       subtotal,
