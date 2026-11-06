@@ -25,6 +25,13 @@ import notificationRoutes from './routes/notificationRoutes.js';
 // Error Handler Middleware
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
 
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '.env') });
 dotenv.config();
 
 if (!process.env.JWT_SECRET) {
@@ -48,6 +55,35 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Performance & Request Timing Middleware
+app.use((req, res, next) => {
+  const start = process.hrtime();
+  let resSize = 0;
+
+  const originalWrite = res.write;
+  const originalEnd = res.end;
+
+  res.write = function (chunk, ...args) {
+    if (chunk) {
+      resSize += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+    }
+    return originalWrite.apply(res, [chunk, ...args]);
+  };
+
+  res.end = function (chunk, ...args) {
+    if (chunk) {
+      resSize += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+    }
+    const diff = process.hrtime(start);
+    const durationMs = (diff[0] * 1e3 + diff[1] * 1e-6).toFixed(2);
+    const sizeKB = (resSize / 1024).toFixed(2);
+    console.log(`[PERF] ${req.method} ${req.originalUrl || req.url} ${res.statusCode} - ${durationMs}ms (${sizeKB} KB)`);
+    return originalEnd.apply(res, [chunk, ...args]);
+  };
+
+  next();
+});
 
 // Socket.IO Setup
 const allowedOrigins = process.env.CLIENT_URL 
