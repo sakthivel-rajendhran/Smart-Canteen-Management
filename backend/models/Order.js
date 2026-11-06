@@ -126,6 +126,15 @@ const orderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     },
+    // Single Pickup Bill notification flag to guarantee strictly one notification per order
+    pickupBillNotificationSent: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    pickupBillNotifiedAt: {
+      type: Date,
+    },
     // Cashier who entered the walk-in order
     cashier: {
       type: mongoose.Schema.Types.ObjectId,

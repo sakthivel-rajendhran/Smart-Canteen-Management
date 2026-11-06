@@ -24,14 +24,16 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
   const isUnread = !notification.read;
   const isHighPriority = notification.priority === 'HIGH';
   const orderCode = notification.metadata?.orderCode || notification.order?.orderCode;
+  const pickupToken = notification.metadata?.pickupToken || orderCode;
+  const targetLink = notification.metadata?.link || (orderCode ? `/tracker/${orderCode}` : '/pickup');
 
   const handleClick = () => {
     if (isUnread) {
       markAsRead(notification._id);
     }
-    if (orderCode) {
+    if (targetLink) {
       if (onCloseDropdown) onCloseDropdown();
-      navigate(`/tracker/${orderCode}`);
+      navigate(targetLink);
     }
   };
 
@@ -104,10 +106,17 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
         {/* Order code link & Action buttons */}
         <div className="flex items-center justify-between mt-2.5 pt-1.5 border-t border-gray-100/70">
           {orderCode ? (
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:text-primary-dark transition-colors">
-              <span>Track #{orderCode}</span>
-              <ArrowUpRight className="w-3 h-3" />
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:text-primary-dark transition-colors">
+                <span>Pickup / Track #{orderCode}</span>
+                <ArrowUpRight className="w-3 h-3" />
+              </span>
+              {notification.metadata?.pickupToken && (
+                <span className="text-[10px] font-mono font-black text-amber-900 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded">
+                  Token #{notification.metadata.pickupToken}
+                </span>
+              )}
+            </div>
           ) : (
             <span />
           )}

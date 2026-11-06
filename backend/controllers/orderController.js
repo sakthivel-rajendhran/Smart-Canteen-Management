@@ -164,26 +164,9 @@ const createOrder = async (req, res) => {
 
         io.to('admin').emit('order:created', populatedOrder);
 
-        const isOrderPlacerAdmin = req.user.role === 'admin' || req.user.role === 'ADMIN';
-
-        // 1. Student notification: Order Placed (only for non-admin customers, avoiding duplicate alerts if admin placed order)
-        if (!isOrderPlacerAdmin) {
-          await createAndEmitNotification(io, {
-            userId: req.user._id,
-            orderId: order._id,
-            orderCode: order.orderCode,
-            status: 'Placed',
-            eventId: `ORDER_CUSTOMER_${order.orderCode}_PLACED`,
-            metadata: {
-              orderCode: order.orderCode,
-              total: order.total,
-              itemsCount: order.items.length,
-              customerName: req.user.name,
-            },
-          });
-        }
-
-        // 2. Admin notification: New Order Received (idempotent, single notification per admin)
+        // Smart Notification Rule:
+        // Do NOT send customer notification on Order Placed (only ONE notification is sent when order reaches Pickup Bill).
+        // Admin notification: New Order Received (idempotent, single notification per admin)
         await createAndEmitAdminNotification(io, {
           title: '🔔 New Order Placed',
           message: `New order #${order.orderCode} received from ${req.user.name || 'Customer'} (₹${order.total})`,
@@ -334,33 +317,21 @@ const updateOrderStatus = async (req, res) => {
 
     const io = req.app.get('socketio');
     if (io) {
-      // 1. Create and emit real-time notification to the specific student (idempotent, single transition alert)
-      await createAndEmitNotification(io, {
-        userId: order.user._id,
-        orderId: order._id,
-        orderCode: order.orderCode,
-        status: order.status,
-        eventId: `ORDER_CUSTOMER_${order.orderCode}_${order.status.toUpperCase()}`,
-        metadata: {
+      // 1. REAL-TIME TRACKING EVENT: Broadcast every status change to customer tracking
+      if (order.user) {
+        io.to(`user:${order.user._id}`).emit('order:statusChanged', {
+          orderId: order._id,
           orderCode: order.orderCode,
-          total: order.total,
-          itemsCount: order.items?.length,
-        },
-      });
+          status: order.status,
+          paymentStatus: order.paymentStatus,
+          order,
+        });
+      }
 
-      // 2. Notify the specific student tracking their order page
-      io.to(`user:${order.user._id}`).emit('order:statusChanged', {
-        orderId: order._id,
-        orderCode: order.orderCode,
-        status: order.status,
-        paymentStatus: order.paymentStatus,
-        order,
-      });
-
-      // 3. Notify admin page
+      // 2. REAL-TIME ORDER STATUS EVENT: Broadcast to admin order management
       io.to('admin').emit('order:updated', order);
 
-      // 4. Broadcast live ready tokens change to public counter display
+      // 3. Broadcast live ready tokens change to public counter display
       io.emit('pickup:readyTokensChanged', {
         orderId: order._id,
         orderCode: order.orderCode,
@@ -368,6 +339,45 @@ const updateOrderStatus = async (req, res) => {
         status: order.status,
         readyAt: order.updatedAt,
       });
+
+      // 4. SMART NOTIFICATION RULE:
+      // Send only ONE customer notification when an order reaches 'Pickup Bill'.
+      // All other status changes (Placed, Confirmed, Preparing, Ready, Handover Bill, Completed)
+      // update tracking timelines in real time without sending customer notifications.
+      if (status === 'Pickup Bill' && order.user && !order.pickupBillNotificationSent) {
+        order.pickupBillNotificationSent = true;
+        order.pickupBillNotifiedAt = new Date();
+        
+        // Atomic DB safeguard to prevent duplicates from concurrent API calls or refreshes
+        await Order.updateOne(
+          { _id: order._id, pickupBillNotificationSent: { $ne: true } },
+          { $set: { pickupBillNotificationSent: true, pickupBillNotifiedAt: new Date() } }
+        );
+
+        const pickupToken = order.pickupToken || order.orderCode;
+        await createAndEmitNotification(io, {
+          userId: order.user._id,
+          orderId: order._id,
+          orderCode: order.orderCode,
+          status: 'Pickup Bill',
+          customType: 'ORDER_READY',
+          customTitle: 'Your Order Is Ready!',
+          customMessage: `Your order #${order.orderCode} is ready for collection. Please visit the canteen counter and show your pickup token ${pickupToken}.`,
+          customIcon: '🧾',
+          customPriority: 'HIGH',
+          eventId: `ORDER_CUSTOMER_${order.orderCode}_PICKUP_BILL`,
+          metadata: {
+            orderId: order._id,
+            orderCode: order.orderCode,
+            pickupToken: pickupToken,
+            status: 'Pickup Bill',
+            dateTime: new Date().toISOString(),
+            link: '/pickup',
+            total: order.total,
+            itemsCount: order.items?.length || 0,
+          },
+        });
+      }
     }
 
     res.json({ success: true, message: `Order status updated to ${status}`, data: order });

@@ -51,6 +51,10 @@ const notificationSchema = new mongoose.Schema(
     },
     metadata: {
       orderCode: { type: String, default: '' },
+      pickupToken: { type: String, default: '' },
+      status: { type: String, default: '' },
+      dateTime: { type: String, default: '' },
+      link: { type: String, default: '/pickup' },
       total: { type: Number },
       itemsCount: { type: Number },
       pickupCounter: { type: String, default: 'DRS Quick Serve Canteen' },

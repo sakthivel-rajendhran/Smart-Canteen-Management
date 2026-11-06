@@ -33,6 +33,14 @@ export const orderNotificationTemplates = {
     icon: '🔔',
     priority: 'HIGH',
   },
+  'Pickup Bill': {
+    type: 'ORDER_READY',
+    title: 'Your Order Is Ready!',
+    message: (orderCode, pickupToken) =>
+      `Your order #${orderCode} is ready for collection. Please visit the canteen counter and show your pickup token ${pickupToken || orderCode}.`,
+    icon: '🧾',
+    priority: 'HIGH',
+  },
   Completed: {
     type: 'ORDER_COMPLETED',
     title: '✓ Order Completed',

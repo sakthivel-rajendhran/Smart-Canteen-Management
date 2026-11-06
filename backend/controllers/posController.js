@@ -320,25 +320,13 @@ export const verifyAndHandoverOrder = async (req, res) => {
         status: 'Handover Bill',
       });
       if (order.user) {
+        // Update customer tracking timeline immediately without generating a customer notification
         io.to(`user:${order.user._id || order.user}`).emit('order:statusChanged', {
           orderId: order._id,
           orderCode: order.orderCode,
           status: 'Handover Bill',
           paymentStatus: order.paymentStatus,
           order,
-        });
-
-        // Emit student notification
-        createAndEmitNotification(io, {
-          userId: order.user._id || order.user,
-          orderId: order._id,
-          orderCode: order.orderCode,
-          status: 'Handover Bill',
-          eventId: `ORDER_CUSTOMER_${order.orderCode}_HANDOVER_BILL`,
-          metadata: {
-            orderCode: order.orderCode,
-            total: order.total,
-          },
         });
       }
     }
