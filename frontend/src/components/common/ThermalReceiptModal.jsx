@@ -1,21 +1,200 @@
 import React, { useState, useEffect } from 'react';
-import { Printer, X, Receipt, CheckCircle2 } from 'lucide-react';
+import { Printer, X, Receipt } from 'lucide-react';
 
 const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
   const [paperWidth, setPaperWidth] = useState('80mm'); // '80mm' | '58mm'
 
+  const is58mm = paperWidth === '58mm';
+  const pickupToken = order?.pickupToken || String(order?.orderCode || '').replace('DRS-', '');
+
+  const handlePrint = () => {
+    const receiptElement = document.getElementById('thermal-receipt');
+    const targetWidth = is58mm ? '58mm' : '80mm';
+
+    if (!receiptElement) {
+      window.print();
+      return;
+    }
+
+    const iframeId = '__drs_receipt_print_iframe__';
+    let iframe = document.getElementById(iframeId);
+    if (iframe && iframe.parentNode) {
+      iframe.parentNode.removeChild(iframe);
+    }
+
+    iframe = document.createElement('iframe');
+    iframe.id = iframeId;
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-10000px';
+    iframe.style.top = '0';
+    iframe.style.width = targetWidth;
+    iframe.style.height = '600px';
+    iframe.style.border = '0';
+    iframe.style.opacity = '0.01';
+    iframe.style.pointerEvents = 'none';
+    iframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(iframe);
+
+    // Collect all stylesheets from main document
+    let stylesHtml = '';
+    const styleTags = document.querySelectorAll('link[rel="stylesheet"], style');
+    styleTags.forEach((tag) => {
+      if (!tag.innerText || !tag.innerText.includes('thermal-receipt-modal-box')) {
+        stylesHtml += tag.outerHTML + '\n';
+      }
+    });
+
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (!doc) {
+      window.print();
+      return;
+    }
+
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Receipt - Token #${pickupToken}</title>
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+          <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+          ${stylesHtml}
+          <style>
+            @page {
+              size: ${targetWidth} auto;
+              margin: 0mm;
+            }
+            *, *::before, *::after {
+              box-sizing: border-box !important;
+            }
+            html, body {
+              width: ${targetWidth} !important;
+              max-width: ${targetWidth} !important;
+              margin: 0 auto !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+              color: #000000 !important;
+              font-family: 'DM Mono', 'Courier New', Courier, monospace, Arial, sans-serif !important;
+              font-size: ${is58mm ? '11px' : '12px'} !important;
+              line-height: 1.3 !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              height: auto !important;
+              min-height: 0 !important;
+              max-height: none !important;
+              overflow: visible !important;
+            }
+            .thermal-receipt-root {
+              width: ${targetWidth} !important;
+              max-width: ${targetWidth} !important;
+              margin: 0 auto !important;
+              padding: ${is58mm ? '2.5mm 1.5mm 4mm 1.5mm' : '3.5mm 2.5mm 5mm 2.5mm'} !important;
+              background: #ffffff !important;
+              color: #000000 !important;
+              border: none !important;
+              box-shadow: none !important;
+              border-radius: 0 !important;
+              page-break-after: avoid !important;
+              break-after: avoid !important;
+              page-break-before: avoid !important;
+              break-before: avoid !important;
+              height: auto !important;
+              overflow: visible !important;
+            }
+            * {
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+            /* Self-contained POS layout primitives */
+            .flex { display: flex !important; }
+            .items-center { align-items: center !important; }
+            .items-start { align-items: flex-start !important; }
+            .items-baseline { align-items: baseline !important; }
+            .justify-between { justify-content: space-between !important; }
+            .flex-1 { flex: 1 1 0% !important; }
+            .text-center { text-align: center !important; }
+            .text-right { text-align: right !important; }
+            .text-left { text-align: left !important; }
+            .font-bold { font-weight: 700 !important; }
+            .font-semibold { font-weight: 600 !important; }
+            .font-black { font-weight: 900 !important; }
+            .font-medium { font-weight: 500 !important; }
+            .uppercase { text-transform: uppercase !important; }
+            .w-9 { width: 2.25rem !important; }
+            .w-16 { width: 4rem !important; }
+            .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .border-b { border-bottom: 1px solid #000 !important; }
+            .border-b-2 { border-bottom: 2px solid #000 !important; }
+            .border-dashed { border-style: dashed !important; }
+          </style>
+        </head>
+        <body>
+          ${receiptElement.outerHTML}
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    const triggerPrint = () => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+
+        const cleanup = () => {
+          setTimeout(() => {
+            if (iframe && iframe.parentNode) {
+              iframe.parentNode.removeChild(iframe);
+            }
+          }, 1500);
+        };
+
+        if (iframe.contentWindow) {
+          iframe.contentWindow.onafterprint = cleanup;
+        }
+        setTimeout(cleanup, 60000);
+      } catch (err) {
+        console.error('Iframe print error, falling back:', err);
+        window.print();
+      }
+    };
+
+    if (doc.readyState === 'complete') {
+      setTimeout(triggerPrint, 200);
+    } else {
+      iframe.onload = () => setTimeout(triggerPrint, 200);
+      setTimeout(triggerPrint, 350);
+    }
+  };
+
+  // Intercept Ctrl+P / Cmd+P while modal is open to ensure clean isolated continuous print
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        handlePrint();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, paperWidth, order]);
+
+  // Handle auto-print if requested
   useEffect(() => {
     if (isOpen && autoPrint && order) {
       const timer = setTimeout(() => {
-        window.print();
+        handlePrint();
       }, 350);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, autoPrint, order]);
+  }, [isOpen, autoPrint, order, paperWidth]);
 
   if (!isOpen || !order) return null;
 
-  const is58mm = paperWidth === '58mm';
   const orderDate = new Date(order.createdAt || Date.now());
   const formattedDate = orderDate.toLocaleDateString('en-IN', {
     day: '2-digit',
@@ -50,74 +229,51 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
   const paymentStatusUpper = String(order.paymentStatus || 'paid').toUpperCase();
   const isPaid = paymentStatusUpper === 'PAID';
 
-  const pickupToken = order.pickupToken || String(order.orderCode || '').replace('DRS-', '');
-
-  const handlePrint = () => {
-    window.print();
-  };
-
   return (
     <div className="fixed inset-0 z-[60] overflow-y-auto bg-stone-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:bg-white print:static">
       
-      {/* Injected Dynamic Thermal Print Stylesheet */}
+      {/* Injected Dynamic Thermal Print Stylesheet (Dual defense for direct print / Ctrl+P) */}
       <style>{`
         @media print {
           @page {
             size: ${is58mm ? '58mm auto' : '80mm auto'};
-            margin: 1.5mm 1mm;
+            margin: 0;
           }
 
           html, body {
             width: ${is58mm ? '58mm' : '80mm'} !important;
+            max-width: ${is58mm ? '58mm' : '80mm'} !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
             color: #000000 !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
 
-          /* Hide everything except the thermal receipt container */
-          body > *:not(#root) {
-            display: none !important;
-          }
-          nav, footer, header, .no-print, [role="alert"], #pwa-installer {
-            display: none !important;
+          /* Hide ALL other elements on the entire page */
+          body * {
+            visibility: hidden !important;
           }
 
-          /* Reset all parent wrappers */
-          #root, #root > div, main {
-            display: block !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: auto !important;
-            height: auto !important;
-            min-height: 0 !important;
+          /* Make ONLY the thermal receipt and its descendants visible */
+          #thermal-receipt, #thermal-receipt * {
+            visibility: visible !important;
           }
 
-          .fixed {
-            position: static !important;
-            inset: auto !important;
-            background: #ffffff !important;
-            padding: 0 !important;
-            margin: 0 !important;
-          }
-
-          .thermal-receipt-modal-box {
-            background: #ffffff !important;
-            box-shadow: none !important;
-            border: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            max-width: none !important;
-            width: 100% !important;
-          }
-
-          .thermal-receipt-root {
+          /* Position the receipt at the top-left of the page so no background space is reserved */
+          #thermal-receipt {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
             width: ${is58mm ? '58mm' : '80mm'} !important;
             max-width: ${is58mm ? '58mm' : '80mm'} !important;
-            margin: 0 auto !important;
-            padding: ${is58mm ? '2mm 1.5mm' : '3mm 2.5mm'} !important;
+            margin: 0 !important;
+            padding: ${is58mm ? '2.5mm 1.5mm 4mm 1.5mm' : '3.5mm 2.5mm 5mm 2.5mm'} !important;
             border: none !important;
             box-shadow: none !important;
             border-radius: 0 !important;
@@ -125,6 +281,8 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
             color: #000000 !important;
             page-break-after: avoid !important;
             break-after: avoid !important;
+            height: auto !important;
+            overflow: visible !important;
           }
 
           .thermal-avoid-break {
@@ -408,4 +566,3 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
 };
 
 export default ThermalReceiptModal;
-
