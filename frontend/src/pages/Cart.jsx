@@ -55,6 +55,13 @@ const Cart = () => {
 
   const handlePlaceOrder = async () => {
     setCheckoutError('');
+
+    // Offline safety guard: do not allow placing fake orders while offline
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setCheckoutError('⚠️ You are currently offline. Please reconnect to the internet to place your order.');
+      return;
+    }
+
     setCheckoutLoading(true);
 
     try {

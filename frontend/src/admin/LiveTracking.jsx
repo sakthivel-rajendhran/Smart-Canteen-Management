@@ -654,10 +654,21 @@ const LiveTracking = () => {
                         {customerName.charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <strong className="text-xs font-bold text-primary-dark block leading-tight">
-                          {customerName}
-                        </strong>
-                        <span className="text-[10px] text-muted block leading-tight">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <strong className="text-xs font-bold text-primary-dark block leading-tight">
+                            {customerName}
+                          </strong>
+                          {order.user?.accountType === 'STAFF' || order.user?.role === 'STAFF' ? (
+                            <span className="text-[9px] font-black bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-md border border-blue-200">
+                              💼 Staff {order.user.staffDetails?.staffId ? `(${order.user.staffDetails.staffId})` : ''}
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-black bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-md border border-emerald-200">
+                              🎓 Student {order.user?.studentDetails?.department ? `• ${order.user.studentDetails.department}` : ''}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-muted block leading-tight mt-0.5">
                           {customerEmail}
                         </span>
                       </div>

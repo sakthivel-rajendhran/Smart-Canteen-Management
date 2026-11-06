@@ -136,6 +136,11 @@ const createOrder = async (req, res) => {
             _id: req.user._id,
             name: req.user.name,
             email: req.user.email,
+            phone: req.user.phone,
+            role: req.user.role,
+            accountType: req.user.accountType || req.user.role,
+            studentDetails: req.user.studentDetails,
+            staffDetails: req.user.staffDetails,
           },
         };
 
@@ -226,7 +231,7 @@ const getOrderById = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    const order = await Order.findOne(query).populate('user', 'name email');
+    const order = await Order.findOne(query).populate('user', 'name email phone role accountType studentDetails staffDetails');
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
@@ -261,7 +266,7 @@ const updateOrderStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    const order = await Order.findOne(query).populate('user', 'name email');
+    const order = await Order.findOne(query).populate('user', 'name email phone role accountType studentDetails staffDetails');
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
@@ -406,7 +411,7 @@ const getAdminOrders = async (req, res) => {
     const skipNum = (pageNum - 1) * limitNum;
 
     const orders = await Order.find(query)
-      .populate('user', 'name email')
+      .populate('user', 'name email phone role accountType studentDetails staffDetails')
       .sort({ createdAt: -1 })
       .skip(skipNum)
       .limit(limitNum);
@@ -467,7 +472,7 @@ const getActiveOrders = async (req, res) => {
     }
 
     const orders = await Order.find(query)
-      .populate('user', 'name email phone')
+      .populate('user', 'name email phone role accountType studentDetails staffDetails')
       .sort({ createdAt: -1 });
 
     res.json({

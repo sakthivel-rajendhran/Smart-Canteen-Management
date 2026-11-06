@@ -1,42 +1,88 @@
 import User from '../models/User.js';
 import generateToken from '../utils/generateToken.js';
 
-// @desc    Register a new user
+// @desc    Register a new user (Student or College Staff)
 // @route   POST /api/auth/register
 // @access  Public
 const registerUser = async (req, res) => {
   try {
-    const { name, email, password, phone } = req.body;
+    const {
+      name,
+      email,
+      password,
+      phone,
+      accountType,
+      studentDetails,
+      staffDetails,
+    } = req.body;
 
     if (!name || !email || !password) {
       res.status(400);
       throw new Error('Please fill all required fields');
     }
 
-    const userExists = await User.findOne({ email });
+    const cleanEmail = String(email).trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    if (!emailRegex.test(cleanEmail)) {
+      res.status(400);
+      throw new Error('Please provide a valid email address');
+    }
 
+    if (String(password).length < 6) {
+      res.status(400);
+      throw new Error('Password must be at least 6 characters long');
+    }
+
+    const userExists = await User.findOne({ email: cleanEmail });
     if (userExists) {
       res.status(400);
       throw new Error('User already exists with this email');
     }
 
-    const user = await User.create({
-      name,
-      email,
+    // STRICT SECURITY: Public registration can ONLY create STUDENT or STAFF accounts
+    // Admin accounts can NEVER be created through public registration
+    const targetAccountType = accountType === 'STAFF' ? 'STAFF' : 'STUDENT';
+    const targetRole = targetAccountType;
+
+    const userData = {
+      name: String(name).trim(),
+      email: cleanEmail,
       password,
-      phone: phone || '',
-    });
+      phone: phone ? String(phone).replace(/\D/g, '') : '',
+      role: targetRole,
+      accountType: targetAccountType,
+    };
+
+    if (targetAccountType === 'STUDENT') {
+      userData.studentDetails = {
+        registerNumber: studentDetails?.registerNumber ? String(studentDetails.registerNumber).trim() : '',
+        department: studentDetails?.department ? String(studentDetails.department).trim() : '',
+        year: studentDetails?.year ? String(studentDetails.year).trim() : '',
+      };
+      userData.staffDetails = null;
+    } else {
+      userData.staffDetails = {
+        staffId: staffDetails?.staffId ? String(staffDetails.staffId).trim() : '',
+        department: staffDetails?.department ? String(staffDetails.department).trim() : '',
+      };
+      userData.studentDetails = null;
+    }
+
+    const user = await User.create(userData);
 
     if (user) {
       res.status(201).json({
         success: true,
-        message: 'Registration successful',
+        message: `${targetAccountType === 'STAFF' ? 'College Staff' : 'Student'} registration successful`,
         data: {
           _id: user._id,
           name: user.name,
           email: user.email,
           role: user.role,
+          accountType: user.accountType,
           phone: user.phone,
+          studentDetails: user.studentDetails,
+          staffDetails: user.staffDetails,
           token: generateToken(user._id),
         },
       });
@@ -62,9 +108,19 @@ const loginUser = async (req, res) => {
       throw new Error('Please enter email and password');
     }
 
-    const user = await User.findOne({ email });
+    const cleanEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: cleanEmail });
 
     if (user && (await user.matchPassword(password))) {
+      // Safe fallback account type for existing accounts
+      const resolvedAccountType =
+        user.accountType ||
+        (user.role === 'admin' || user.role === 'ADMIN'
+          ? 'ADMIN'
+          : user.role === 'STAFF'
+          ? 'STAFF'
+          : 'STUDENT');
+
       res.json({
         success: true,
         message: 'Login successful',
@@ -73,7 +129,10 @@ const loginUser = async (req, res) => {
           name: user.name,
           email: user.email,
           role: user.role,
+          accountType: resolvedAccountType,
           phone: user.phone,
+          studentDetails: user.studentDetails,
+          staffDetails: user.staffDetails,
           token: generateToken(user._id),
         },
       });
@@ -130,6 +189,20 @@ const updateUserProfile = async (req, res) => {
         user.email = req.body.email;
       }
 
+      if (req.body.studentDetails && user.role === 'STUDENT') {
+        user.studentDetails = {
+          ...user.studentDetails,
+          ...req.body.studentDetails,
+        };
+      }
+
+      if (req.body.staffDetails && user.role === 'STAFF') {
+        user.staffDetails = {
+          ...user.staffDetails,
+          ...req.body.staffDetails,
+        };
+      }
+
       const updatedUser = await user.save();
 
       res.json({
@@ -140,7 +213,10 @@ const updateUserProfile = async (req, res) => {
           name: updatedUser.name,
           email: updatedUser.email,
           role: updatedUser.role,
+          accountType: updatedUser.accountType || updatedUser.role,
           phone: updatedUser.phone,
+          studentDetails: updatedUser.studentDetails,
+          staffDetails: updatedUser.staffDetails,
           token: generateToken(updatedUser._id),
         },
       });

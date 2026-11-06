@@ -218,7 +218,11 @@ const Profile = () => {
             <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-1.5">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-primary-light text-primary-dark border border-primary/20">
                 <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                {user?.role === 'admin' ? 'Canteen Administrator' : 'Student Account'}
+                {user?.role === 'admin' || user?.role === 'ADMIN'
+                  ? 'Canteen Administrator'
+                  : user?.accountType === 'STAFF' || user?.role === 'STAFF'
+                  ? 'College Staff'
+                  : 'Student Account'}
               </span>
               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-green-700 bg-green-50 border border-green-200">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
@@ -242,6 +246,38 @@ const Profile = () => {
                 </span>
               )}
             </div>
+
+            {/* Academic / Staff Meta Pills */}
+            {user?.studentDetails?.registerNumber && (
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-2.5">
+                <span className="text-[11px] font-bold bg-cream border border-border text-primary-dark px-2.5 py-1 rounded-lg">
+                  🎓 Reg No: {user.studentDetails.registerNumber}
+                </span>
+                {user.studentDetails.department && (
+                  <span className="text-[11px] font-bold bg-cream border border-border text-primary-dark px-2.5 py-1 rounded-lg">
+                    🏛️ {user.studentDetails.department}
+                  </span>
+                )}
+                {user.studentDetails.year && (
+                  <span className="text-[11px] font-bold bg-cream border border-border text-primary-dark px-2.5 py-1 rounded-lg">
+                    📅 {user.studentDetails.year}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {user?.staffDetails?.staffId && (
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-2.5">
+                <span className="text-[11px] font-bold bg-blue-50 border border-blue-200 text-blue-800 px-2.5 py-1 rounded-lg">
+                  💼 Staff ID: {user.staffDetails.staffId}
+                </span>
+                {user.staffDetails.department && (
+                  <span className="text-[11px] font-bold bg-blue-50 border border-blue-200 text-blue-800 px-2.5 py-1 rounded-lg">
+                    🏛️ {user.staffDetails.department}
+                  </span>
+                )}
+              </div>
+            )}
 
             {avatarNote && (
               <p className="text-xs text-primary font-semibold mt-2.5 flex items-center justify-center sm:justify-start gap-1">

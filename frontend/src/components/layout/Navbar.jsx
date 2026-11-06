@@ -187,29 +187,38 @@ const Navbar = () => {
           {user && (
             <NotificationBell isAdmin={user.role === 'admin'} />
           )}
-          {user?.role === 'admin' ? (
+          {user?.role === 'admin' || user?.role === 'ADMIN' ? (
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="text-white hover:text-amber transition-all focus:outline-none"
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
-          ) : (
-            // Student mobile layout: bottom nav is used, but we show mini cart on top header
-            <Link to="/cart" className="relative text-white p-1 hover:text-amber">
+          ) : user ? (
+            // Authenticated customer mobile layout: show cart icon on header
+            <Link to="/cart" className="relative text-white p-1 hover:text-amber transition-colors" title="View Cart">
               <ShoppingCart className="w-6 h-6" />
               {cartCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-amber text-primary-darker font-bold text-[9px] w-4 h-4 rounded-full flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 bg-amber text-primary-darker font-bold text-[9px] w-4 h-4 rounded-full flex items-center justify-center shadow-xs">
                   {cartCount}
                 </span>
               )}
+            </Link>
+          ) : (
+            // Visitor on landing page: replace cart icon with professional Login / Sign Up button
+            <Link
+              to="/login"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-amber text-primary-darker hover:bg-amber-dark active:scale-95 transition-all shadow-md shadow-amber/25"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>Login / Sign Up</span>
             </Link>
           )}
         </div>
       </nav>
 
       {/* Admin Mobile Menu Drawer */}
-      {mobileMenuOpen && user?.role === 'admin' && (
+      {mobileMenuOpen && (user?.role === 'admin' || user?.role === 'ADMIN') && (
         <div className="md:hidden fixed inset-0 z-40 bg-primary-darker/95 backdrop-blur-md pt-20 px-6 flex flex-col gap-4">
           {adminNavItems.map((item) => (
             <Link
@@ -236,16 +245,16 @@ const Navbar = () => {
         </div>
       )}
 
-      {/* Student Mobile Bottom Navigation (Hidden for admin) */}
-      {user?.role !== 'admin' && (
-        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-primary-darker border-t border-white/10 z-40 h-16 px-4 shadow-2xl flex items-center justify-around">
+      {/* Customer Mobile Bottom Navigation: Visible ONLY when authenticated (Hidden on public landing page & admin) */}
+      {Boolean(user && user.role !== 'admin' && user.role !== 'ADMIN') && (
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-primary-darker/98 backdrop-blur-md border-t border-white/10 z-40 h-16 pb-[env(safe-area-inset-bottom,0px)] px-2 shadow-2xl flex items-center justify-around">
           {studentNavItems.map((item) => (
             <Link
               key={item.path}
               to={item.path}
               className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
                 isActive(item.path)
-                  ? 'text-amber scale-105'
+                  ? 'text-amber scale-105 font-bold'
                   : 'text-white/60 hover:text-white'
               }`}
             >

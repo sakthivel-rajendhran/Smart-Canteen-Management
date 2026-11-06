@@ -6,17 +6,29 @@ const AuthContext = createContext(null);
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authStatus, setAuthStatus] = useState('PUBLIC'); // 'PUBLIC' | 'AUTHENTICATED' | 'LOGGING_OUT'
 
   useEffect(() => {
     // Check if user session exists in localStorage
     const savedUser = localStorage.getItem('drs_user');
     if (savedUser) {
       try {
-        setUser(JSON.parse(savedUser));
+        const parsed = JSON.parse(savedUser);
+        if (parsed && parsed.token) {
+          setUser(parsed);
+          setAuthStatus('AUTHENTICATED');
+        } else {
+          setUser(null);
+          setAuthStatus('PUBLIC');
+        }
       } catch (e) {
         console.error('Error parsing user session', e);
         localStorage.removeItem('drs_user');
+        setUser(null);
+        setAuthStatus('PUBLIC');
       }
+    } else {
+      setAuthStatus('PUBLIC');
     }
     setLoading(false);
   }, []);
@@ -27,24 +39,39 @@ export const AuthProvider = ({ children }) => {
       const userData = response.data.data;
       localStorage.setItem('drs_user', JSON.stringify(userData));
       setUser(userData);
+      setAuthStatus('AUTHENTICATED');
       return response.data;
     }
     throw new Error(response.data?.message || 'Login failed');
   };
 
-  const register = async (name, email, password, phone) => {
-    const response = await API.post('/auth/register', { name, email, password, phone });
+  const register = async (registrationData, maybeEmail, maybePassword, maybePhone) => {
+    // Support both object payload and positional arguments for backwards compatibility
+    const payload =
+      typeof registrationData === 'object' && registrationData !== null
+        ? registrationData
+        : {
+            name: registrationData,
+            email: maybeEmail,
+            password: maybePassword,
+            phone: maybePhone,
+            accountType: 'STUDENT',
+          };
+
+    const response = await API.post('/auth/register', payload);
     if (response.data?.success) {
       const userData = response.data.data;
       localStorage.setItem('drs_user', JSON.stringify(userData));
       setUser(userData);
+      setAuthStatus('AUTHENTICATED');
       return response.data;
     }
     throw new Error(response.data?.message || 'Registration failed');
   };
 
-  const updateProfile = async (name, email, phone) => {
-    const response = await API.put('/auth/profile', { name, email, phone });
+  const updateProfile = async (name, email, phone, details = {}) => {
+    const payload = { name, email, phone, ...details };
+    const response = await API.put('/auth/profile', payload);
     if (response.data?.success) {
       const updatedUser = response.data.data;
       // Merge token into updated session
@@ -63,13 +90,37 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    setAuthStatus('LOGGING_OUT');
     localStorage.removeItem('drs_user');
     localStorage.removeItem('drs_cart');
     setUser(null);
+    setAuthStatus('PUBLIC');
   };
 
+  const isAuthenticated = Boolean(user && user.token);
+  const isStudent = Boolean(
+    user && (user.accountType === 'STUDENT' || user.role === 'STUDENT' || user.role === 'user')
+  );
+  const isStaff = Boolean(user && (user.accountType === 'STAFF' || user.role === 'STAFF'));
+  const isAdmin = Boolean(user && (user.role === 'admin' || user.role === 'ADMIN'));
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, updateProfile, changePassword, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        authStatus,
+        isAuthenticated,
+        isStudent,
+        isStaff,
+        isAdmin,
+        login,
+        register,
+        updateProfile,
+        changePassword,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

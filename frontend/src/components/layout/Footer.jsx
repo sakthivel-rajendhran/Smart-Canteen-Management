@@ -5,9 +5,12 @@ import { useAuth } from '../../context/AuthContext';
 const Footer = () => {
   const { user } = useAuth();
   
-  // Hide footer on mobile bottom-nav layout to preserve screen space
+  const hasBottomNav = Boolean(user && user.role !== 'admin' && user.role !== 'ADMIN');
+
   return (
-    <footer className="bg-primary-darker py-8 px-[5%] text-center text-white/50 border-t border-white/5 pb-24 md:pb-8">
+    <footer className={`bg-primary-darker py-8 px-[5%] text-center text-white/50 border-t border-white/5 ${
+      hasBottomNav ? 'pb-24 md:pb-8' : 'pb-8'
+    }`}>
       <div className="max-w-6xl mx-auto">
         <div className="font-outfit text-lg text-white font-extrabold mb-2">
           DRS <em className="text-amber not-italic">Quick Serve</em>

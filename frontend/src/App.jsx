@@ -15,6 +15,7 @@ import AdminRoute from './components/common/AdminRoute';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 import NotificationToast from './components/notifications/NotificationToast';
+import PWAInstaller from './components/common/PWAInstaller';
 
 // Core Student Pages (eager loaded for fast first render)
 import Home from './pages/Home';
@@ -54,6 +55,7 @@ function App() {
             <NotificationProvider>
               <div className="flex flex-col min-h-screen">
                 <NotificationToast />
+                <PWAInstaller />
                 <Navbar />
                 <main className="flex-grow">
                   <Suspense fallback={<PageFallback />}>

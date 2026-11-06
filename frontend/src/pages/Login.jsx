@@ -1,7 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Eye, EyeOff, ShieldCheck, Mail, Lock, User, AlertCircle } from 'lucide-react';
+import {
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Mail,
+  Lock,
+  User,
+  AlertCircle,
+  GraduationCap,
+  Briefcase,
+  Building2,
+  Hash,
+  Calendar,
+} from 'lucide-react';
+
+const DEPARTMENTS = [
+  'Computer Science & Engg (CSE)',
+  'Information Technology (IT)',
+  'Electronics & Comm (ECE)',
+  'Electrical & Electronics (EEE)',
+  'Mechanical Engineering (MECH)',
+  'Civil Engineering (CIVIL)',
+  'Artificial Intelligence & Data Science (AI&DS)',
+  'Science & Humanities',
+  'Management Studies (MBA/BBA)',
+  'Other Department',
+];
+
+const YEARS = [
+  '1st Year (I/II Sem)',
+  '2nd Year (III/IV Sem)',
+  '3rd Year (V/VI Sem)',
+  '4th Year (VII/VIII Sem)',
+];
 
 const Login = () => {
   const { user, login, register } = useAuth();
@@ -9,23 +42,42 @@ const Login = () => {
 
   const [activeTab, setActiveTab] = useState('login'); // 'login' or 'signup'
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Form inputs
+  // Core Form inputs
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
 
+  // Account Type Selection: 'STUDENT' | 'STAFF'
+  const [accountType, setAccountType] = useState('STUDENT');
+
+  // Student specific fields
+  const [registerNumber, setRegisterNumber] = useState('');
+  const [studentDept, setStudentDept] = useState(DEPARTMENTS[0]);
+  const [studentYear, setStudentYear] = useState(YEARS[0]);
+
+  // College Staff specific fields
+  const [staffId, setStaffId] = useState('');
+  const [staffDept, setStaffDept] = useState(DEPARTMENTS[0]);
+
   // Password strength states
-  const [pwStrength, setPwStrength] = useState({ score: 0, label: '', colorClass: 'bg-gray-200', textClass: 'text-gray-400' });
+  const [pwStrength, setPwStrength] = useState({
+    score: 0,
+    label: '',
+    colorClass: 'bg-gray-200',
+    textClass: 'text-gray-400',
+  });
 
   // Redirect if already logged in
   useEffect(() => {
     if (user) {
-      navigate(user.role === 'admin' ? '/admin' : '/menu');
+      navigate(user.role === 'admin' || user.role === 'ADMIN' ? '/admin' : '/menu');
     }
   }, [user, navigate]);
 
@@ -34,6 +86,7 @@ const Login = () => {
     setError('');
     setSuccess('');
     setPassword('');
+    setConfirmPassword('');
   };
 
   const handlePasswordChange = (val) => {
@@ -42,7 +95,7 @@ const Login = () => {
       setPwStrength({ score: 0, label: '', colorClass: 'bg-gray-200', textClass: 'text-gray-400' });
       return;
     }
-    
+
     let score = 0;
     if (val.length >= 6) score++;
     if (val.length >= 10) score++;
@@ -53,7 +106,7 @@ const Login = () => {
       { score: 1, label: 'Weak — too short', colorClass: 'bg-red-500 w-1/4', textClass: 'text-red-500' },
       { score: 2, label: 'Fair — try adding numbers', colorClass: 'bg-orange-500 w-2/4', textClass: 'text-orange-500' },
       { score: 3, label: 'Good — almost there!', colorClass: 'bg-yellow-500 w-3/4', textClass: 'text-yellow-500' },
-      { score: 4, label: 'Strong password ✅', colorClass: 'bg-green-500 w-full', textClass: 'text-green-500' }
+      { score: 4, label: 'Strong password ✅', colorClass: 'bg-green-500 w-full', textClass: 'text-green-500' },
     ];
 
     const s = Math.max(0, Math.min(3, score - 1));
@@ -86,27 +139,78 @@ const Login = () => {
         const res = await login(email, password);
         setSuccess('✅ Login successful! Redirecting...');
         setTimeout(() => {
-          navigate(res.data.role === 'admin' ? '/admin' : '/menu');
-        }, 900);
+          navigate(res.data.role === 'admin' || res.data.role === 'ADMIN' ? '/admin' : '/menu');
+        }, 800);
       } else {
-        if (!name) {
-          setError('Name field is required');
+        // Sign Up Validations
+        if (!name.trim()) {
+          setError('Full Name is required');
           setSubmitting(false);
           return;
         }
+
         if (password.length < 6) {
           setError('Password must be at least 6 characters');
           setSubmitting(false);
           return;
         }
-        const res = await register(name, email, password, phone);
-        setSuccess('✅ Account created! Redirecting to menu...');
+
+        if (password !== confirmPassword) {
+          setError('Passwords do not match. Please re-enter.');
+          setSubmitting(false);
+          return;
+        }
+
+        if (!phone || phone.length !== 10) {
+          setError('Please enter a valid 10-digit mobile number');
+          setSubmitting(false);
+          return;
+        }
+
+        let studentDetails = null;
+        let staffDetails = null;
+
+        if (accountType === 'STUDENT') {
+          if (!registerNumber.trim()) {
+            setError('Student Register Number is required');
+            setSubmitting(false);
+            return;
+          }
+          studentDetails = {
+            registerNumber: registerNumber.trim(),
+            department: studentDept,
+            year: studentYear,
+          };
+        } else {
+          if (!staffId.trim()) {
+            setError('College Staff ID is required');
+            setSubmitting(false);
+            return;
+          }
+          staffDetails = {
+            staffId: staffId.trim(),
+            department: staffDept,
+          };
+        }
+
+        await register({
+          name: name.trim(),
+          email: email.trim().toLowerCase(),
+          password,
+          phone,
+          accountType,
+          studentDetails,
+          staffDetails,
+        });
+
+        setSuccess(`✅ ${accountType === 'STAFF' ? 'College Staff' : 'Student'} account created! Redirecting to menu...`);
         setTimeout(() => {
           navigate('/menu');
         }, 900);
       }
     } catch (err) {
-      const errorMsg = err.response?.data?.message || err.message || 'An error occurred during authentication';
+      const errorMsg =
+        err.response?.data?.message || err.message || 'An error occurred during authentication';
       setError(errorMsg);
       setSubmitting(false);
     }
@@ -195,24 +299,78 @@ const Login = () => {
           {/* Form */}
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             {activeTab === 'signup' && (
-              <div className="relative">
-                <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Full Name</label>
-                <div className="relative">
-                  <User className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400" />
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Your full name"
-                    className="w-full bg-cream border-2 border-border focus:border-primary focus:bg-white rounded-xl py-3 pl-11 pr-4 text-sm focus:outline-none transition-all"
-                  />
+              <>
+                {/* Account Type Selection */}
+                <div>
+                  <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-2">
+                    Select Account Type
+                  </label>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setAccountType('STUDENT')}
+                      className={`p-3 rounded-2xl border-2 flex items-center gap-2.5 transition-all text-left ${
+                        accountType === 'STUDENT'
+                          ? 'border-primary bg-primary/10 text-primary-dark font-black shadow-sm ring-1 ring-primary/20'
+                          : 'border-border bg-cream text-muted hover:border-gray-300'
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                        accountType === 'STUDENT' ? 'bg-primary text-white shadow-xs' : 'bg-gray-200 text-gray-500'
+                      }`}>
+                        <GraduationCap className="w-4.5 h-4.5" />
+                      </div>
+                      <div>
+                        <span className="block text-xs font-bold leading-tight">Student</span>
+                        <span className="text-[10px] opacity-75 font-medium leading-tight">Learner</span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAccountType('STAFF')}
+                      className={`p-3 rounded-2xl border-2 flex items-center gap-2.5 transition-all text-left ${
+                        accountType === 'STAFF'
+                          ? 'border-primary bg-primary/10 text-primary-dark font-black shadow-sm ring-1 ring-primary/20'
+                          : 'border-border bg-cream text-muted hover:border-gray-300'
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                        accountType === 'STAFF' ? 'bg-primary text-white shadow-xs' : 'bg-gray-200 text-gray-500'
+                      }`}>
+                        <Briefcase className="w-4.5 h-4.5" />
+                      </div>
+                      <div>
+                        <span className="block text-xs font-bold leading-tight">College Staff</span>
+                        <span className="text-[10px] opacity-75 font-medium leading-tight">Faculty/Staff</span>
+                      </div>
+                    </button>
+                  </div>
                 </div>
-              </div>
+
+                {/* Full Name */}
+                <div className="relative">
+                  <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Full Name</label>
+                  <div className="relative">
+                    <User className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400" />
+                    <input
+                      type="text"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder={accountType === 'STAFF' ? 'Prof. / Dr. / Staff Name' : 'Student Full Name'}
+                      className="w-full bg-cream border-2 border-border focus:border-primary focus:bg-white rounded-xl py-3 pl-11 pr-4 text-sm focus:outline-none transition-all"
+                    />
+                  </div>
+                </div>
+              </>
             )}
 
+            {/* Email Address */}
             <div className="relative">
-              <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Email Address</label>
+              <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                {activeTab === 'signup' && accountType === 'STAFF' ? 'Official Email Address' : 'Email Address'}
+              </label>
               <div className="relative">
                 <Mail className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400" />
                 <input
@@ -220,29 +378,151 @@ const Login = () => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
+                  placeholder={activeTab === 'signup' && accountType === 'STAFF' ? 'staff@college.edu' : 'you@example.com'}
                   className="w-full bg-cream border-2 border-border focus:border-primary focus:bg-white rounded-xl py-3 pl-11 pr-4 text-sm focus:outline-none transition-all"
                 />
               </div>
             </div>
 
+            {/* Sign Up Specific Details */}
             {activeTab === 'signup' && (
-              <div className="relative">
-                <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Phone Number</label>
+              <>
+                {/* Phone Number */}
                 <div className="relative">
-                  <span className="absolute left-3.5 top-3 text-sm font-semibold text-gray-400 select-none">+91</span>
-                  <input
-                    type="tel"
-                    maxLength="10"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                    placeholder="Enter 10 digit number"
-                    className="w-full bg-cream border-2 border-border focus:border-primary focus:bg-white rounded-xl py-3 pl-14 pr-4 text-sm focus:outline-none transition-all"
-                  />
+                  <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Mobile Phone Number</label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-3 text-sm font-semibold text-gray-400 select-none">+91</span>
+                    <input
+                      type="tel"
+                      maxLength="10"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                      placeholder="10 digit mobile number"
+                      className="w-full bg-cream border-2 border-border focus:border-primary focus:bg-white rounded-xl py-3 pl-14 pr-4 text-sm focus:outline-none transition-all"
+                    />
+                  </div>
                 </div>
-              </div>
+
+                {/* Role Specific Fields: Student */}
+                {accountType === 'STUDENT' && (
+                  <div className="space-y-4 bg-gray-50/75 border border-border/70 p-3.5 rounded-2xl">
+                    <div className="text-[11px] font-extrabold text-primary-dark uppercase tracking-wider flex items-center gap-1.5">
+                      <GraduationCap className="w-4 h-4 text-primary" />
+                      <span>Student Academic Details</span>
+                    </div>
+
+                    {/* Student Register Number */}
+                    <div className="relative">
+                      <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1">
+                        Register Number / Roll No. *
+                      </label>
+                      <div className="relative">
+                        <Hash className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          required
+                          value={registerNumber}
+                          onChange={(e) => setRegisterNumber(e.target.value)}
+                          placeholder="e.g. 714021104001"
+                          className="w-full bg-white border border-border focus:border-primary rounded-xl py-2.5 pl-10 pr-4 text-xs font-medium focus:outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Department */}
+                    <div className="relative">
+                      <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1">
+                        Department *
+                      </label>
+                      <div className="relative">
+                        <Building2 className="absolute left-3.5 top-3 w-4 h-4 text-gray-400 pointer-events-none" />
+                        <select
+                          value={studentDept}
+                          onChange={(e) => setStudentDept(e.target.value)}
+                          className="w-full bg-white border border-border focus:border-primary rounded-xl py-2.5 pl-10 pr-8 text-xs font-medium focus:outline-none transition-all appearance-none cursor-pointer"
+                        >
+                          {DEPARTMENTS.map((dept) => (
+                            <option key={dept} value={dept}>{dept}</option>
+                          ))}
+                        </select>
+                        <div className="absolute right-3.5 top-3 pointer-events-none text-gray-400 text-xs">▼</div>
+                      </div>
+                    </div>
+
+                    {/* Year / Semester */}
+                    <div className="relative">
+                      <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1">
+                        Year / Semester *
+                      </label>
+                      <div className="relative">
+                        <Calendar className="absolute left-3.5 top-3 w-4 h-4 text-gray-400 pointer-events-none" />
+                        <select
+                          value={studentYear}
+                          onChange={(e) => setStudentYear(e.target.value)}
+                          className="w-full bg-white border border-border focus:border-primary rounded-xl py-2.5 pl-10 pr-8 text-xs font-medium focus:outline-none transition-all appearance-none cursor-pointer"
+                        >
+                          {YEARS.map((y) => (
+                            <option key={y} value={y}>{y}</option>
+                          ))}
+                        </select>
+                        <div className="absolute right-3.5 top-3 pointer-events-none text-gray-400 text-xs">▼</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Role Specific Fields: College Staff */}
+                {accountType === 'STAFF' && (
+                  <div className="space-y-4 bg-gray-50/75 border border-border/70 p-3.5 rounded-2xl">
+                    <div className="text-[11px] font-extrabold text-primary-dark uppercase tracking-wider flex items-center gap-1.5">
+                      <Briefcase className="w-4 h-4 text-primary" />
+                      <span>College Staff Details</span>
+                    </div>
+
+                    {/* Staff ID */}
+                    <div className="relative">
+                      <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1">
+                        Staff ID / Employee Code *
+                      </label>
+                      <div className="relative">
+                        <Hash className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          required
+                          value={staffId}
+                          onChange={(e) => setStaffId(e.target.value)}
+                          placeholder="e.g. DRS-STAFF-104"
+                          className="w-full bg-white border border-border focus:border-primary rounded-xl py-2.5 pl-10 pr-4 text-xs font-medium focus:outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Department */}
+                    <div className="relative">
+                      <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1">
+                        Department / Faculty *
+                      </label>
+                      <div className="relative">
+                        <Building2 className="absolute left-3.5 top-3 w-4 h-4 text-gray-400 pointer-events-none" />
+                        <select
+                          value={staffDept}
+                          onChange={(e) => setStaffDept(e.target.value)}
+                          className="w-full bg-white border border-border focus:border-primary rounded-xl py-2.5 pl-10 pr-8 text-xs font-medium focus:outline-none transition-all appearance-none cursor-pointer"
+                        >
+                          {DEPARTMENTS.map((dept) => (
+                            <option key={dept} value={dept}>{dept}</option>
+                          ))}
+                        </select>
+                        <div className="absolute right-3.5 top-3 pointer-events-none text-gray-400 text-xs">▼</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
+            {/* Password */}
             <div className="relative">
               <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Password</label>
               <div className="relative">
@@ -275,12 +555,52 @@ const Login = () => {
               )}
             </div>
 
+            {/* Confirm Password (Sign Up Only) */}
+            {activeTab === 'signup' && (
+              <div className="relative">
+                <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-gray-400" />
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter password"
+                    className={`w-full bg-cream border-2 rounded-xl py-3 pl-11 pr-11 text-sm focus:outline-none transition-all ${
+                      confirmPassword && confirmPassword !== password
+                        ? 'border-red-400 focus:border-red-500'
+                        : 'border-border focus:border-primary focus:bg-white'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-3 text-gray-400 hover:text-primary-dark transition-all focus:outline-none"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                  </button>
+                </div>
+                {confirmPassword && confirmPassword !== password && (
+                  <span className="text-[10px] font-bold text-red-500 mt-1 block">
+                    Passwords do not match
+                  </span>
+                )}
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-primary-dark text-white font-bold py-3.5 rounded-xl hover:bg-primary transition-all flex items-center justify-center gap-2 transform hover:-translate-y-0.5 shadow-md shadow-primary/20 disabled:bg-gray-400 disabled:transform-none disabled:shadow-none mt-2"
+              className="w-full bg-primary-dark text-white font-bold py-3.5 rounded-xl hover:bg-primary transition-all flex items-center justify-center gap-2 transform hover:-translate-y-0.5 shadow-md shadow-primary/20 disabled:bg-gray-400 disabled:transform-none disabled:shadow-none mt-2 active:scale-98"
             >
-              {submitting ? 'Authenticating...' : activeTab === 'login' ? 'Login →' : 'Create Account →'}
+              {submitting
+                ? 'Authenticating...'
+                : activeTab === 'login'
+                ? 'Login →'
+                : `Create ${accountType === 'STAFF' ? 'Staff' : 'Student'} Account →`}
             </button>
           </form>
         </div>

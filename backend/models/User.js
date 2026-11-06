@@ -20,8 +20,22 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['user', 'admin'],
-      default: 'user',
+      enum: ['user', 'admin', 'STUDENT', 'STAFF', 'ADMIN'],
+      default: 'STUDENT',
+    },
+    accountType: {
+      type: String,
+      enum: ['STUDENT', 'STAFF', 'ADMIN'],
+      default: 'STUDENT',
+    },
+    studentDetails: {
+      registerNumber: { type: String, default: '' },
+      department: { type: String, default: '' },
+      year: { type: String, default: '' },
+    },
+    staffDetails: {
+      staffId: { type: String, default: '' },
+      department: { type: String, default: '' },
     },
     avatar: {
       type: String,
