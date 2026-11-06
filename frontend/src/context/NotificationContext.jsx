@@ -145,15 +145,27 @@ export const NotificationProvider = ({ children }) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Fetch initial notifications from REST API
+  // Fetch initial notifications from REST API with client-side deduplication guard
   const fetchNotifications = useCallback(async () => {
     if (!user) return;
     try {
       setLoading(true);
       const res = await notificationService.getNotifications({ limit: 50 });
       if (res?.success) {
-        setNotifications(res.data || []);
-        setUnreadCount(typeof res.unreadCount === 'number' ? res.unreadCount : 0);
+        const rawList = res.data || [];
+        // Deduplicate in memory by eventId and (orderCode + type)
+        const seenKeys = new Set();
+        const dedupedList = [];
+        for (const item of rawList) {
+          const key = item.eventId || `${item.metadata?.orderCode || item._id}_${item.type}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            dedupedList.push(item);
+          }
+        }
+        setNotifications(dedupedList);
+        const actualUnread = dedupedList.filter((n) => !n.read).length;
+        setUnreadCount(actualUnread);
       }
     } catch (err) {
       console.error('Failed to load notification history:', err);
@@ -265,18 +277,34 @@ export const NotificationProvider = ({ children }) => {
     if (!socket) return;
 
     const handleNewNotification = (newNotif) => {
-      console.log('🔔 Real-time notification received:', newNotif);
       if (!newNotif) return;
 
       setNotifications((prev) => {
-        if (prev.some((n) => n._id === newNotif._id)) return prev;
+        // Strict deduplication check by _id, eventId, and (orderCode + type)
+        const isDuplicate = prev.some((n) => {
+          if (newNotif._id && n._id === newNotif._id) return true;
+          if (newNotif.eventId && n.eventId === newNotif.eventId) return true;
+          const newCode = newNotif.metadata?.orderCode;
+          const prevCode = n.metadata?.orderCode;
+          if (newCode && prevCode && newCode === prevCode && n.type === newNotif.type) {
+            return true;
+          }
+          return false;
+        });
+
+        if (isDuplicate) {
+          console.log('[NOTIFICATION DEDUP] Ignored duplicate real-time alert:', newNotif.title, newNotif.metadata?.orderCode);
+          return prev;
+        }
+
+        // Only for genuine new events: update count, show toast, and play chime
+        setUnreadCount((prevCount) => prevCount + 1);
+        addToast(newNotif);
+        playChime(newNotif.priority);
+        triggerBrowserNotification(newNotif);
+
         return [newNotif, ...prev];
       });
-
-      setUnreadCount((prev) => prev + 1);
-      addToast(newNotif);
-      playChime(newNotif.priority);
-      triggerBrowserNotification(newNotif);
     };
 
     const handleReadNotification = ({ id }) => {

@@ -146,29 +146,38 @@ const createOrder = async (req, res) => {
 
         io.to('admin').emit('order:created', populatedOrder);
 
-        // 1. Student notification: Order Placed
-        await createAndEmitNotification(io, {
-          userId: req.user._id,
+        const isOrderPlacerAdmin = req.user.role === 'admin' || req.user.role === 'ADMIN';
+
+        // 1. Student notification: Order Placed (only for non-admin customers, avoiding duplicate alerts if admin placed order)
+        if (!isOrderPlacerAdmin) {
+          await createAndEmitNotification(io, {
+            userId: req.user._id,
+            orderId: order._id,
+            orderCode: order.orderCode,
+            status: 'Placed',
+            eventId: `ORDER_CUSTOMER_${order.orderCode}_PLACED`,
+            metadata: {
+              orderCode: order.orderCode,
+              total: order.total,
+              itemsCount: order.items.length,
+              customerName: req.user.name,
+            },
+          });
+        }
+
+        // 2. Admin notification: New Order Received (idempotent, single notification per admin)
+        await createAndEmitAdminNotification(io, {
+          title: '🔔 New Order Placed',
+          message: `New order #${order.orderCode} received from ${req.user.name || 'Customer'} (₹${order.total})`,
+          icon: '🔔',
+          priority: 'HIGH',
           orderId: order._id,
           orderCode: order.orderCode,
-          status: 'Placed',
+          eventId: `ORDER_ADMIN_${order.orderCode}_PLACED`,
           metadata: {
             orderCode: order.orderCode,
             total: order.total,
             itemsCount: order.items.length,
-          },
-        });
-
-        // 2. Admin notification: New Order Received
-        await createAndEmitAdminNotification(io, {
-          title: '🔔 New Order Placed',
-          message: `New order #${order.orderCode} received from ${req.user.name || 'Student'} (₹${order.total})`,
-          icon: '🔔',
-          priority: 'HIGH',
-          orderId: order._id,
-          metadata: {
-            orderCode: order.orderCode,
-            total: order.total,
             customerName: req.user.name,
           },
         });
@@ -292,12 +301,13 @@ const updateOrderStatus = async (req, res) => {
 
     const io = req.app.get('socketio');
     if (io) {
-      // 1. Create and emit real-time notification to the specific student
+      // 1. Create and emit real-time notification to the specific student (idempotent, single transition alert)
       await createAndEmitNotification(io, {
         userId: order.user._id,
         orderId: order._id,
         orderCode: order.orderCode,
         status: order.status,
+        eventId: `ORDER_CUSTOMER_${order.orderCode}_${order.status.toUpperCase()}`,
         metadata: {
           orderCode: order.orderCode,
           total: order.total,
@@ -367,17 +377,37 @@ const cancelOrder = async (req, res) => {
 
     const io = req.app.get('socketio');
     if (io) {
-      // Create and emit notification to the student
+      const cancelledByRole = (req.user.role === 'admin' || req.user.role === 'ADMIN') ? 'Admin' : 'Student';
+
+      // 1. Create and emit notification to the customer (idempotent)
       await createAndEmitNotification(io, {
         userId: order.user,
         orderId: order._id,
         orderCode: order.orderCode,
         status: 'Cancelled',
+        eventId: `ORDER_CUSTOMER_${order.orderCode}_CANCELLED`,
         metadata: {
           orderCode: order.orderCode,
-          cancelledBy: req.user.role === 'admin' ? 'Admin' : 'Student',
+          cancelledBy: cancelledByRole,
         },
       });
+
+      // 2. If student cancelled, notify admins idempotently
+      if (cancelledByRole === 'Student') {
+        await createAndEmitAdminNotification(io, {
+          title: '⚠ Order Cancelled',
+          message: `Order #${order.orderCode} was cancelled by ${req.user.name || 'Customer'}.`,
+          icon: '⚠',
+          priority: 'HIGH',
+          orderId: order._id,
+          orderCode: order.orderCode,
+          eventId: `ORDER_ADMIN_${order.orderCode}_CANCELLED`,
+          metadata: {
+            orderCode: order.orderCode,
+            cancelledBy: 'Student',
+          },
+        });
+      }
 
       io.to(`user:${order.user}`).emit('order:statusChanged', {
         orderId: order._id,

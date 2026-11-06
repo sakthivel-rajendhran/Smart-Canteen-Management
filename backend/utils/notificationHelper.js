@@ -51,7 +51,8 @@ export const orderNotificationTemplates = {
 };
 
 /**
- * Create a notification in MongoDB and emit in real time to the student's room
+ * Create a notification in MongoDB idempotently and emit in real time to the student's private room.
+ * Strict Rule: One Event = One Notification per User.
  */
 export const createAndEmitNotification = async (io, options) => {
   const {
@@ -59,6 +60,7 @@ export const createAndEmitNotification = async (io, options) => {
     orderId,
     orderCode,
     status,
+    eventId: customEventId,
     customType,
     customTitle,
     customMessage,
@@ -70,7 +72,6 @@ export const createAndEmitNotification = async (io, options) => {
   if (!userId) return null;
 
   const template = orderNotificationTemplates[status] || {};
-
   const type = customType || template.type || 'SYSTEM';
   const title = customTitle || template.title || 'Order Update';
   const message =
@@ -79,83 +80,138 @@ export const createAndEmitNotification = async (io, options) => {
   const icon = customIcon || template.icon || '🔔';
   const priority = customPriority || template.priority || 'NORMAL';
 
-  const notification = await Notification.create({
-    user: userId,
-    order: orderId || undefined,
-    type,
-    title,
-    message,
-    icon,
-    priority,
-    metadata: {
-      orderCode: orderCode || '',
-      ...metadata,
-    },
-    read: false,
-  });
+  // Construct stable, deterministic event identifier
+  const eventId =
+    customEventId ||
+    `ORDER_CUSTOMER_${orderCode || orderId || 'EVT'}_${(status || type).toUpperCase()}`;
 
-  // Emit to student's private authenticated room
-  if (io) {
-    io.to(`user:${userId}`).emit('notification:new', notification);
+  try {
+    // 1. Check if this exact event notification already exists for this user (idempotency check)
+    const existing = await Notification.findOne({ user: userId, eventId });
+    if (existing) {
+      return existing; // Already generated; avoid duplicate emit and document
+    }
+
+    // 2. Create notification atomically
+    let notification;
+    try {
+      notification = await Notification.create({
+        user: userId,
+        order: orderId || undefined,
+        eventId,
+        type,
+        title,
+        message,
+        icon,
+        priority,
+        metadata: {
+          orderCode: orderCode || '',
+          ...metadata,
+        },
+        read: false,
+      });
+    } catch (createErr) {
+      // Catch MongoDB duplicate key error (E11000) on concurrent requests
+      if (createErr.code === 11000) {
+        return await Notification.findOne({ user: userId, eventId });
+      }
+      throw createErr;
+    }
+
+    // 3. Emit strictly ONCE to user's private room
+    if (io) {
+      io.to(`user:${userId}`).emit('notification:new', notification);
+    }
+
+    return notification;
+  } catch (err) {
+    console.error(`[NOTIFICATION] Failed to create notification for user ${userId}:`, err.message);
+    return null;
   }
-
-  return notification;
 };
 
 /**
- * Notify all admins via Socket.IO and persist notifications for admin accounts
+ * Notify all admins idempotently via Socket.IO and persist one notification per admin account.
+ * Deduplication Guarantee: Emits strictly to user:${admin._id} once, avoiding duplicate room broadcasts.
  */
 export const createAndEmitAdminNotification = async (io, options) => {
   const {
     title,
     message,
     icon = '🔔',
-    priority = 'NORMAL',
+    priority = 'HIGH',
     orderId,
+    orderCode,
+    eventId: customEventId,
     metadata = {},
   } = options;
 
   try {
-    // Find admin users
-    const admins = await User.find({ role: 'admin' }).select('_id');
+    // Construct stable admin eventId
+    const eventId =
+      customEventId ||
+      `ORDER_ADMIN_${orderCode || orderId || 'EVT'}_PLACED`;
+
+    // Find all administrative accounts
+    const admins = await User.find({
+      role: { $in: ['admin', 'ADMIN'] },
+    }).select('_id name email');
 
     const createdNotifications = [];
+
     for (const admin of admins) {
-      const notification = await Notification.create({
-        user: admin._id,
-        order: orderId || undefined,
-        type: 'SYSTEM',
-        title,
-        message,
-        icon,
-        priority,
-        metadata,
-        read: false,
-      });
-      createdNotifications.push(notification);
+      try {
+        // 1. Check if this admin already has a notification for this event
+        const existing = await Notification.findOne({ user: admin._id, eventId });
+        if (existing) {
+          createdNotifications.push(existing);
+          continue;
+        }
 
-      // Emit to each admin's private room
-      if (io) {
-        io.to(`user:${admin._id}`).emit('notification:new', notification);
+        // 2. Atomically create one notification for this admin
+        let notification;
+        try {
+          notification = await Notification.create({
+            user: admin._id,
+            order: orderId || undefined,
+            eventId,
+            type: 'SYSTEM',
+            title,
+            message,
+            icon,
+            priority,
+            metadata: {
+              orderCode: orderCode || '',
+              ...metadata,
+            },
+            read: false,
+          });
+        } catch (createErr) {
+          if (createErr.code === 11000) {
+            notification = await Notification.findOne({ user: admin._id, eventId });
+          } else {
+            throw createErr;
+          }
+        }
+
+        if (notification) {
+          createdNotifications.push(notification);
+
+          // 3. Emit ONLY to this admin's personal authenticated room.
+          // Note: DO NOT broadcast to 'admin' room here, because admin sockets already join user:${admin._id}.
+          // Emitting to both caused duplicate real-time alerts.
+          if (io) {
+            io.to(`user:${admin._id}`).emit('notification:new', notification);
+          }
+        }
+      } catch (adminErr) {
+        console.error(`[NOTIFICATION] Failed to deliver admin notification to ${admin._id}:`, adminErr.message);
       }
-    }
-
-    // Also broadcast to general admin room
-    if (io) {
-      io.to('admin').emit('notification:new', {
-        type: 'SYSTEM',
-        title,
-        message,
-        icon,
-        priority,
-        metadata,
-        createdAt: new Date(),
-      });
     }
 
     return createdNotifications;
   } catch (err) {
-    console.error('Error creating admin notifications:', err);
+    console.error('Error creating admin notifications:', err.message);
     return [];
   }
 };

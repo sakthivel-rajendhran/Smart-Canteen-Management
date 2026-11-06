@@ -12,6 +12,11 @@ const notificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Order',
     },
+    eventId: {
+      type: String,
+      trim: true,
+      index: true,
+    },
     type: {
       type: String,
       enum: [
@@ -49,6 +54,8 @@ const notificationSchema = new mongoose.Schema(
       total: { type: Number },
       itemsCount: { type: Number },
       pickupCounter: { type: String, default: 'DRS Quick Serve Canteen' },
+      customerName: { type: String, default: '' },
+      cancelledBy: { type: String, default: '' },
     },
     read: {
       type: Boolean,
@@ -67,6 +74,9 @@ const notificationSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Compound unique index for strict database-level deduplication: One Event = One Notification per User
+notificationSchema.index({ user: 1, eventId: 1 }, { unique: true, sparse: true });
 
 // Compound index for lightning-fast user notification queries and unread counting
 notificationSchema.index({ user: 1, read: 1, createdAt: -1 });
