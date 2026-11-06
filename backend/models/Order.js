@@ -135,24 +135,6 @@ const orderSchema = new mongoose.Schema(
     pickupBillNotifiedAt: {
       type: Date,
     },
-    // Internal Bill Tracking (Canteen Accounting & Founder Sales Proof)
-    internalBillGenerated: {
-      type: Boolean,
-      default: false,
-      index: true,
-    },
-    internalBillNumber: {
-      type: String,
-      default: '',
-      index: true,
-    },
-    internalBillId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'InternalBill',
-    },
-    internalBillPrintedAt: {
-      type: Date,
-    },
     // Cashier who entered the walk-in order
     cashier: {
       type: mongoose.Schema.Types.ObjectId,

@@ -4,10 +4,8 @@ import {
   getReadyOrders,
   getHandoverOrders,
   verifyAndHandoverOrder,
-  generateInternalBill,
   getBillArchive,
   getBillById,
-  getFounderDailySalesSummary,
   getRetentionSettings,
   updateRetentionSettings,
   cleanupExpiredBills,
@@ -28,10 +26,8 @@ router.get('/pos/ready-orders', getReadyOrders);
 router.get('/pos/handover-orders', getHandoverOrders);
 router.post('/pos/verify-pickup', verifyAndHandoverOrder);
 router.post('/orders/:id/verify-pickup', verifyAndHandoverOrder);
-router.post('/pos/generate-internal-bill', generateInternalBill);
 
 // Bill Archive & Sales History
-router.get('/bills/founder-report', getFounderDailySalesSummary);
 router.get('/bills', getBillArchive);
 router.get('/bills/:id', getBillById);
 

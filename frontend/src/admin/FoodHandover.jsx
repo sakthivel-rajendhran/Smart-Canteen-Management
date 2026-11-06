@@ -45,7 +45,6 @@ const FoodHandover = () => {
   // Quick Verification Form Input at the top
   const [quickVerifyInput, setQuickVerifyInput] = useState('');
   const [verifying, setVerifying] = useState(false);
-  const [printingBillId, setPrintingBillId] = useState(null);
 
   // Result Banner / Alert State
   const [handoverResult, setHandoverResult] = useState(null); // { type: 'success' | 'duplicate' | 'error', message, order }
@@ -171,10 +170,20 @@ const FoodHandover = () => {
         const orderData = res.data.data;
         setHandoverResult({
           type: 'success',
-          message: res.data.message || `Order verified & food handed over successfully!`,
+          message: res.data.message || `Order verified & handed over successfully!`,
           order: orderData,
         });
         setQuickVerifyInput('');
+
+        // Automatically open thermal receipt print for the verified order
+        if (orderData) {
+          setReceiptModal({
+            isOpen: true,
+            order: orderData,
+            autoPrint: true,
+          });
+        }
+
         fetchOrders(false);
       }
     } catch (err) {
@@ -192,49 +201,18 @@ const FoodHandover = () => {
     }
   };
 
-  // Button 1: Print Internal Bill (Does NOT mark order completed)
-  const handlePrintInternalBill = async (order) => {
-    try {
-      setPrintingBillId(order._id);
-      const res = await API.post('/admin/pos/generate-internal-bill', {
-        orderId: order._id,
-        token: order.pickupToken || order.orderCode,
-      });
-
-      if (res.data?.success) {
-        const bill = res.data.data;
-        // Update local order item with internal bill details
-        setOrders((prev) =>
-          prev.map((o) =>
-            o._id === order._id
-              ? {
-                  ...o,
-                  internalBillGenerated: true,
-                  internalBillNumber: bill.billNumber,
-                  internalBillPrintedAt: bill.lastPrintedAt || bill.generatedAt,
-                  billPrintCount: bill.billPrintCount || 1,
-                }
-              : o
-          )
-        );
-
-        // Open thermal modal with autoPrint
-        setReceiptModal({
-          isOpen: true,
-          order: bill,
-          autoPrint: true,
-        });
-      }
-    } catch (err) {
-      console.error('Failed to generate internal bill:', err);
-      alert(err.response?.data?.message || 'Failed to generate internal sales bill.');
-    } finally {
-      setPrintingBillId(null);
-    }
-  };
-
-  // Button 2: Open Physical Handover Confirmation Dialog (Does NOT trigger bill print)
+  // Click Handover button on a card:
+  // Step 1: Open Thermal Bill Print
+  // Step 2: Show Physical Handover Confirmation Dialog
   const handleStartHandover = (order) => {
+    // 1. Trigger receipt print
+    setReceiptModal({
+      isOpen: true,
+      order,
+      autoPrint: true,
+    });
+
+    // 2. Open confirmation prompt
     setConfirmModal({
       isOpen: true,
       order,
@@ -257,7 +235,7 @@ const FoodHandover = () => {
         playSound(true);
         setHandoverResult({
           type: 'success',
-          message: `✓ Food handed over! Order #${targetOrder.orderCode} (Token #${targetOrder.pickupToken}) marked as Completed.`,
+          message: `Food physically handed over! Order #${targetOrder.orderCode} (Token #${targetOrder.pickupToken}) marked as Handover Bill.`,
           order: res.data.data || targetOrder,
         });
         setConfirmModal({ isOpen: false, order: null });
@@ -291,7 +269,7 @@ const FoodHandover = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-outfit font-black text-base sm:text-lg tracking-tight">
-                  Food Handover & Internal Billing Counter
+                  Handover & Bill Printing Counter
                 </h1>
                 <span className="bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black uppercase px-2 py-0.5 rounded-full flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -299,7 +277,7 @@ const FoodHandover = () => {
                 </span>
               </div>
               <p className="text-[11px] text-white/70">
-                Generate internal bills for accounting • Physical food collection confirmation • Anti-duplicate validation
+                Print POS thermal bills • Physical food collection confirmation • Anti-duplicate validation
               </p>
             </div>
           </div>
@@ -358,10 +336,10 @@ const FoodHandover = () => {
           <form onSubmit={handleQuickVerifySubmit} className="max-w-3xl mx-auto">
             <div className="text-center mb-3">
               <span className="text-[11px] font-black uppercase tracking-wider text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
-                Direct Counter Pickup & Handover Verification
+                Direct Counter Pickup & Bill Verification
               </span>
               <h2 className="font-outfit font-black text-xl sm:text-2xl text-stone-900 mt-1">
-                Enter Pickup Token to Verify & Hand Over Food
+                Enter Pickup Token to Verify & Print Bill
               </h2>
             </div>
 
@@ -390,8 +368,8 @@ const FoodHandover = () => {
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 className="w-5 h-5 text-amber" />
-                    <span>Verify & Handover Food</span>
+                    <ShieldCheck className="w-5 h-5 text-amber" />
+                    <span>Verify & Print Bill</span>
                   </>
                 )}
               </button>
@@ -800,80 +778,40 @@ const FoodHandover = () => {
                       </div>
                     </div>
 
-                    {/* Internal Bill Status Callout if Generated */}
-                    {order.internalBillGenerated && (
-                      <div className="bg-emerald-50/80 border border-emerald-200 text-emerald-800 px-2.5 py-1 rounded-xl text-[11px] font-mono flex items-center justify-between">
-                        <span className="font-bold flex items-center gap-1">
-                          <Receipt className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>{order.internalBillNumber || `IB-${order.orderCode}`}</span>
-                        </span>
-                        <span className="text-[10px] bg-emerald-200/60 text-emerald-900 font-bold px-1.5 py-0.5 rounded">
-                          {order.billPrintCount > 1 ? `Reprinted (${order.billPrintCount}x)` : 'Bill Printed'}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Action Buttons: Strictly Separated Internal Bill vs Physical Handover */}
+                    {/* Action Buttons */}
                     <div className="pt-1">
                       {isHandoverCompleted ? (
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-emerald-100/70 border border-emerald-200 text-emerald-900 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-between">
-                            <span className="flex items-center gap-1.5">
-                              <CheckCheck className="w-4 h-4 text-emerald-600" />
-                              <span>Handed Over</span>
-                            </span>
-                            <span className="text-[10px] text-emerald-700 font-mono">
-                              {order.handoverVerifiedAt || order.completedAt
-                                ? new Date(order.handoverVerifiedAt || order.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
-                                : 'Completed'}
-                            </span>
-                          </div>
-
                           <button
                             type="button"
-                            disabled={printingBillId === order._id}
-                            onClick={() => handlePrintInternalBill(order)}
-                            className="flex items-center justify-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs py-2 px-3 rounded-xl transition border border-stone-300 shrink-0"
-                            title="Reprint internal sales bill"
+                            onClick={() => setReceiptModal({ isOpen: true, order, autoPrint: false })}
+                            className="flex-1 flex items-center justify-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs py-2.5 px-3 rounded-xl transition border border-stone-300"
                           >
-                            <Printer className={`w-3.5 h-3.5 text-stone-600 ${printingBillId === order._id ? 'animate-spin' : ''}`} />
-                            <span>Reprint Bill</span>
+                            <Printer className="w-3.5 h-3.5 text-stone-600" />
+                            <span>Reprint Thermal Bill</span>
                           </button>
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
-                          {/* Button 1: Print Internal Bill (Does NOT mark order completed) */}
+                          {/* Print Bill preview button */}
                           <button
                             type="button"
-                            disabled={printingBillId === order._id}
-                            onClick={() => handlePrintInternalBill(order)}
-                            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2.5 rounded-xl text-xs font-bold border transition ${
-                              order.internalBillGenerated
-                                ? 'bg-stone-100 hover:bg-stone-200 text-stone-700 border-stone-300'
-                                : 'bg-amber/15 hover:bg-amber/25 text-stone-900 border-amber/40 shadow-2xs'
-                            }`}
-                            title="Generate internal sales bill for canteen accounting (does not complete order)"
+                            onClick={() => setReceiptModal({ isOpen: true, order, autoPrint: false })}
+                            className="p-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl transition border border-stone-300"
+                            title="Preview / Print Bill Only"
                           >
-                            <Printer className={`w-3.5 h-3.5 text-stone-700 ${printingBillId === order._id ? 'animate-spin' : ''}`} />
-                            <span>
-                              {printingBillId === order._id
-                                ? 'Printing...'
-                                : order.internalBillGenerated
-                                ? 'Reprint Bill'
-                                : 'Print Internal Bill'}
-                            </span>
+                            <Printer className="w-4 h-4" />
                           </button>
 
-                          {/* Button 2: Handover Food (Opens confirmation modal only) */}
+                          {/* Primary Handover & Print Button */}
                           <button
                             type="button"
                             disabled={verifying}
                             onClick={() => handleStartHandover(order)}
-                            className="flex-1 flex items-center justify-center gap-1.5 bg-[#0b3d2e] hover:bg-[#1a7a45] active:scale-95 text-white font-black text-xs py-2.5 px-2.5 rounded-xl shadow-xs transition"
-                            title="Confirm physical food collection to customer"
+                            className="flex-1 flex items-center justify-center gap-2 bg-[#0b3d2e] hover:bg-[#1a7a45] active:scale-95 text-white font-black text-xs py-2.5 px-3 rounded-xl shadow transition"
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5 text-amber" />
-                            <span>Handover Food</span>
+                            <Sparkles className="w-3.5 h-3.5 text-amber" />
+                            <span>Handover Food & Print Bill</span>
                           </button>
                         </div>
                       )}
@@ -979,11 +917,17 @@ const FoodHandover = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handlePrintInternalBill(confirmModal.order)}
+                  onClick={() => {
+                    setReceiptModal({
+                      isOpen: true,
+                      order: confirmModal.order,
+                      autoPrint: true,
+                    });
+                  }}
                   className="flex-1 flex items-center justify-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs py-2.5 px-3 rounded-xl border border-stone-300 transition"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  <span>Print Internal Bill</span>
+                  <span>Reprint Bill</span>
                 </button>
 
                 <button
