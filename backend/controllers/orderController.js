@@ -282,7 +282,16 @@ const getOrderById = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Completed', 'Cancelled'];
+    const validStatuses = [
+      'Placed',
+      'Confirmed',
+      'Preparing',
+      'Ready',
+      'Pickup Bill',
+      'Handover Bill',
+      'Completed',
+      'Cancelled',
+    ];
 
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status value' });
@@ -310,9 +319,15 @@ const updateOrderStatus = async (req, res) => {
 
     order.status = status;
 
-    // Handle payment auto-settlement for COD on complete
-    if (status === 'Completed' && order.paymentMethod === 'cod') {
-      order.paymentStatus = 'paid';
+    // Handle payment auto-settlement and handover stamping for Handover Bill / Completed
+    if (status === 'Completed' || status === 'Handover Bill') {
+      if (order.paymentMethod === 'cod' || order.paymentStatus === 'pending') {
+        order.paymentStatus = 'paid';
+      }
+      order.handoverVerified = true;
+      order.completedAt = order.completedAt || new Date();
+      order.handoverVerifiedAt = order.handoverVerifiedAt || new Date();
+      order.handoverVerifiedBy = req.user._id;
     }
 
     await order.save();

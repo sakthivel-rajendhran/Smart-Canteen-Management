@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import Order from '../models/Order.js';
+import User from '../models/User.js';
 import MenuItem from '../models/MenuItem.js';
 import CanteenSettings from '../models/CanteenSettings.js';
 import generateOrderCode from '../utils/generateOrderCode.js';
@@ -156,12 +157,81 @@ export const createWalkInOrder = async (req, res) => {
   }
 };
 
-// @desc    Get All Orders Ready for Pickup (Handover Queue)
+// @desc    Get All Orders for Handover Management Queue (Pending vs Completed)
+// @route   GET /api/admin/pos/handover-orders
+// @access  Private/Admin
+export const getHandoverOrders = async (req, res) => {
+  try {
+    const { filter = 'pending', search = '' } = req.query;
+    const query = {};
+
+    if (filter === 'completed') {
+      query.status = { $in: ['Handover Bill', 'Completed'] };
+    } else if (filter === 'all') {
+      query.status = { $in: ['Ready', 'Pickup Bill', 'Handover Bill', 'Completed'] };
+    } else {
+      // Pending handovers: orders waiting for final collection & bill print ('Pickup Bill' or 'Ready')
+      query.status = { $in: ['Pickup Bill', 'Ready'] };
+      query.handoverVerified = { $ne: true };
+    }
+
+    if (search && search.trim()) {
+      const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(safeSearch, 'i');
+
+      // Match online registered users by name, phone, registerNumber, staffId
+      const matchingUsers = await User.find({
+        $or: [
+          { name: searchRegex },
+          { email: searchRegex },
+          { phone: searchRegex },
+          { 'studentDetails.registerNumber': searchRegex },
+          { 'staffDetails.staffId': searchRegex },
+        ],
+      }).select('_id').lean();
+      const userIds = matchingUsers.map((u) => u._id);
+
+      query.$or = [
+        { orderCode: searchRegex },
+        { pickupToken: searchRegex },
+        { 'walkInCustomer.name': searchRegex },
+        { 'walkInCustomer.phone': searchRegex },
+        { 'walkInCustomer.registerNumber': searchRegex },
+        { 'walkInCustomer.staffId': searchRegex },
+        ...(userIds.length > 0 ? [{ user: { $in: userIds } }] : []),
+      ];
+    }
+
+    const [orders, pendingCount, completedCount] = await Promise.all([
+      Order.find(query)
+        .populate('user', 'name email phone role accountType studentDetails staffDetails')
+        .populate('cashier', 'name')
+        .sort(filter === 'completed' ? { completedAt: -1, updatedAt: -1 } : { updatedAt: 1 })
+        .lean(),
+      Order.countDocuments({ status: { $in: ['Pickup Bill', 'Ready'] }, handoverVerified: { $ne: true } }),
+      Order.countDocuments({ status: { $in: ['Handover Bill', 'Completed'] } }),
+    ]);
+
+    res.json({
+      success: true,
+      count: orders.length,
+      data: orders,
+      stats: {
+        pending: pendingCount,
+        completed: completedCount,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get All Orders Ready for Pickup (Legacy alias)
 // @route   GET /api/admin/pos/ready-orders
 // @access  Private/Admin
 export const getReadyOrders = async (req, res) => {
   try {
-    const readyOrders = await Order.find({ status: 'Ready' })
+    const readyOrders = await Order.find({ status: { $in: ['Ready', 'Pickup Bill'] } })
       .populate('user', 'name phone studentDetails staffDetails')
       .populate('cashier', 'name')
       .sort({ updatedAt: 1 }) // Oldest ready order first
@@ -177,7 +247,7 @@ export const getReadyOrders = async (req, res) => {
   }
 };
 
-// @desc    Verify Pickup & Handover Food to Customer
+// @desc    Verify Pickup & Handover Food to Customer (Status -> Handover Bill)
 // @route   POST /api/admin/pos/verify-pickup
 // @access  Private/Admin
 export const verifyAndHandoverOrder = async (req, res) => {
@@ -202,7 +272,7 @@ export const verifyAndHandoverOrder = async (req, res) => {
     }
 
     // STRICT DUPLICATE HANDOVER PROTECTION
-    if (order.status === 'Completed' || order.handoverVerified) {
+    if (order.status === 'Handover Bill' || order.status === 'Completed' || order.handoverVerified) {
       const collectedTime = order.completedAt
         ? new Date(order.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
         : 'earlier';
@@ -223,8 +293,8 @@ export const verifyAndHandoverOrder = async (req, res) => {
       });
     }
 
-    // Update order status to Completed
-    order.status = 'Completed';
+    // Update order status to Handover Bill (final collected state)
+    order.status = 'Handover Bill';
     order.completedAt = new Date();
     order.handoverVerified = true;
     order.handoverVerifiedAt = new Date();
@@ -247,13 +317,13 @@ export const verifyAndHandoverOrder = async (req, res) => {
         orderId: order._id,
         orderCode: order.orderCode,
         pickupToken: order.pickupToken || order.orderCode,
-        status: 'Completed',
+        status: 'Handover Bill',
       });
       if (order.user) {
         io.to(`user:${order.user._id || order.user}`).emit('order:statusChanged', {
           orderId: order._id,
           orderCode: order.orderCode,
-          status: 'Completed',
+          status: 'Handover Bill',
           paymentStatus: order.paymentStatus,
           order,
         });
@@ -263,8 +333,8 @@ export const verifyAndHandoverOrder = async (req, res) => {
           userId: order.user._id || order.user,
           orderId: order._id,
           orderCode: order.orderCode,
-          status: 'Completed',
-          eventId: `ORDER_CUSTOMER_${order.orderCode}_COMPLETED`,
+          status: 'Handover Bill',
+          eventId: `ORDER_CUSTOMER_${order.orderCode}_HANDOVER_BILL`,
           metadata: {
             orderCode: order.orderCode,
             total: order.total,
@@ -275,7 +345,7 @@ export const verifyAndHandoverOrder = async (req, res) => {
 
     res.json({
       success: true,
-      message: `✓ Food handed over successfully! Order #${order.orderCode} (Token #${order.pickupToken}) marked as Completed.`,
+      message: `✓ Food handed over and bill completed! Order #${order.orderCode} (Token #${order.pickupToken}) marked as Handover Bill.`,
       data: order,
     });
   } catch (error) {
@@ -304,7 +374,9 @@ export const getBillArchive = async (req, res) => {
     const query = {};
 
     // 1. Status Filter (default completed archive, or ALL)
-    if (status !== 'ALL') {
+    if (status === 'Completed' || status === 'Handover Bill') {
+      query.status = { $in: ['Handover Bill', 'Completed'] };
+    } else if (status !== 'ALL') {
       query.status = status;
     }
 
@@ -529,7 +601,7 @@ export const cleanupExpiredBills = async (req, res) => {
     // Only completed orders older than cutoff date are eligible
     // Never touches Placed, Confirmed, Preparing, or Ready orders awaiting pickup!
     const cleanupFilter = {
-      status: 'Completed',
+      status: { $in: ['Handover Bill', 'Completed'] },
       completedAt: { $lt: cutoffDate },
       paymentStatus: 'paid', // Never delete unresolved/disputed payments
     };

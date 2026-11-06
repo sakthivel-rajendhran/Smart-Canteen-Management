@@ -62,7 +62,7 @@ function App() {
                 <NotificationToast />
                 <PWAInstaller />
                 <Navbar />
-                <main className="flex-grow">
+                <main className="flex-grow pb-20 md:pb-0">
                   <Suspense fallback={<PageFallback />}>
                     <Routes>
                       {/* Public routes */}

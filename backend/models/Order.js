@@ -98,7 +98,16 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Completed', 'Cancelled'],
+      enum: [
+        'Placed',
+        'Confirmed',
+        'Preparing',
+        'Ready',
+        'Pickup Bill',
+        'Handover Bill',
+        'Completed',
+        'Cancelled',
+      ],
       default: 'Placed',
       index: true,
     },

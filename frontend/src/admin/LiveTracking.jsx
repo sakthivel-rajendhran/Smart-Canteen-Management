@@ -34,7 +34,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 
-const STATUS_PIPELINE = ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Completed'];
+const STATUS_PIPELINE = ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Pickup Bill'];
 
 const LiveTracking = () => {
   const { user } = useAuth();
@@ -272,7 +272,7 @@ const LiveTracking = () => {
       case 'Preparing':
         return { stage: 'Ready', label: 'Mark as Ready', color: 'bg-green-600 hover:bg-green-700' };
       case 'Ready':
-        return { stage: 'Completed', label: 'Complete Order', color: 'bg-primary-dark hover:bg-primary' };
+        return { stage: 'Pickup Bill', label: 'Move to Pickup Bill', color: 'bg-[#0b3d2e] hover:bg-[#1a7a45]' };
       default:
         return null;
     }
@@ -286,7 +286,11 @@ const LiveTracking = () => {
         setOrders((prev) =>
           prev.map((o) => (o.orderCode === orderCode ? { ...o, status: newStatus } : o))
         );
-        showToast(`✓ Order ${orderCode} moved to ${newStatus}`);
+        if (newStatus === 'Pickup Bill') {
+          showToast(`✓ Order #${orderCode} moved to Pickup Bill (Available in Handover Queue)`);
+        } else {
+          showToast(`✓ Order #${orderCode} moved to ${newStatus}`);
+        }
       }
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to update order status');
@@ -339,8 +343,11 @@ const LiveTracking = () => {
         return 'bg-amber-light text-amber-dark border-amber-300';
       case 'Ready':
         return 'bg-green-100 text-green-800 border-green-300';
+      case 'Pickup Bill':
+        return 'bg-amber-100 text-amber-900 border-amber-400 font-extrabold';
+      case 'Handover Bill':
       case 'Completed':
-        return 'bg-gray-100 text-gray-700 border-gray-200';
+        return 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold';
       case 'Cancelled':
         return 'bg-red-50 text-red-700 border-red-200';
       default:
@@ -849,7 +856,9 @@ const LiveTracking = () => {
                 <div className="flex items-center justify-between relative px-2">
                   <div className="absolute left-6 right-6 top-3 h-0.5 bg-gray-200 -z-0" />
                   {STATUS_PIPELINE.map((step, idx) => {
-                    const currentIndex = STATUS_PIPELINE.indexOf(selectedOrder.status);
+                    const currentIndex = (selectedOrder.status === 'Handover Bill' || selectedOrder.status === 'Completed')
+                      ? 5
+                      : STATUS_PIPELINE.indexOf(selectedOrder.status);
                     const isDone = currentIndex >= idx;
                     const isCurrent = selectedOrder.status === step;
 

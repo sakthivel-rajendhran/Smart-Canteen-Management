@@ -28,18 +28,20 @@ const Tracker = () => {
     { key: 'Placed', icon: '📋', name: 'Order Placed', desc: 'Order received by the canteen' },
     { key: 'Confirmed', icon: '✅', name: 'Confirmed', desc: 'Canteen has confirmed your order' },
     { key: 'Preparing', icon: '👨‍🍳', name: 'Preparing', desc: 'Your food is being cooked fresh' },
-    { key: 'Ready', icon: '🔔', name: 'Ready for Pickup', desc: 'Collect hot food from counter!' },
-    { key: 'Completed', icon: '🎉', name: 'Completed', desc: 'Collected — Enjoy your meal!' }
+    { key: 'Ready', icon: '🔔', name: 'Ready for Pickup', desc: 'Food is ready at counter!' },
+    { key: 'Pickup Bill', icon: '🧾', name: 'Pickup Bill', desc: 'Bill and hot food ready for counter collection' }
   ];
 
-  const STATUS_ORDER = ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Completed'];
+  const STATUS_ORDER = ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Pickup Bill'];
 
   const STATUS_INFO = {
     Placed: { title: 'Order Placed!', msg: 'Waiting for canteen to confirm your order.', bg: 'bg-rose-50 border-rose-200 text-rose-700' },
     Confirmed: { title: 'Order Confirmed!', msg: 'Great! The canteen has confirmed your order.', bg: 'bg-blue-50 border-blue-200 text-blue-700' },
-    Preparing: { title: 'Food Being Prepared!', msg: 'Your fresh Tamil food is being cooked right now.', bg: 'bg-orange-50 border-orange-200 text-orange-700' },
+    Preparing: { title: 'Food Being Prepared!', msg: 'Your fresh food is being cooked right now.', bg: 'bg-orange-50 border-orange-200 text-orange-700' },
     Ready: { title: 'Ready for Pickup!', msg: 'Your food is ready at the counter. Please collect it!', bg: 'bg-green-100 border-green-200 text-green-800' },
-    Completed: { title: 'Order Completed!', msg: 'Thank you! Enjoy your delicious Tamil food. Come again!', bg: 'bg-gray-100 border-gray-200 text-gray-700' },
+    'Pickup Bill': { title: 'Pickup Bill Ready!', msg: 'Your food bill has been generated! Please proceed to the collection counter for your meal and bill.', bg: 'bg-amber-100 border-amber-300 text-amber-950 ring-2 ring-amber-400/20' },
+    'Handover Bill': { title: 'Food Handed Over & Bill Completed!', msg: 'Order collected successfully. Thank you for dining with DRS Quick Serve! Enjoy your meal.', bg: 'bg-emerald-50 border-emerald-300 text-emerald-950' },
+    Completed: { title: 'Order Completed!', msg: 'Order collected successfully. Thank you, enjoy your meal!', bg: 'bg-gray-100 border-gray-200 text-gray-700' },
     Cancelled: { title: 'Order Cancelled ✕', msg: 'This order was cancelled.', bg: 'bg-red-50 border-red-200 text-red-700' }
   };
 
@@ -117,7 +119,8 @@ const Tracker = () => {
   }
 
   const currentStatus = order.status;
-  const currentStepIndex = STATUS_ORDER.indexOf(currentStatus);
+  const isFinalDone = currentStatus === 'Handover Bill' || currentStatus === 'Completed';
+  const currentStepIndex = isFinalDone ? 5 : STATUS_ORDER.indexOf(currentStatus);
   const statusInfo = STATUS_INFO[currentStatus] || STATUS_INFO['Placed'];
 
 
@@ -161,7 +164,7 @@ const Tracker = () => {
       {/* Live Status Message Banner */}
       <div className={`border rounded-2xl p-5 mb-8 flex items-center gap-4 ${statusInfo.bg}`}>
         <span className="text-4xl select-none">
-          {currentStatus === 'Placed' ? '📋' : currentStatus === 'Confirmed' ? '✅' : currentStatus === 'Preparing' ? '👨‍🍳' : currentStatus === 'Ready' ? '🔔' : currentStatus === 'Cancelled' ? '✕' : '🎉'}
+          {currentStatus === 'Placed' ? '📋' : currentStatus === 'Confirmed' ? '✅' : currentStatus === 'Preparing' ? '👨‍🍳' : currentStatus === 'Ready' ? '🔔' : currentStatus === 'Pickup Bill' ? '🧾' : currentStatus === 'Cancelled' ? '✕' : '🎉'}
         </span>
         <div>
           <h3 className="font-outfit font-black text-base">{statusInfo.title}</h3>

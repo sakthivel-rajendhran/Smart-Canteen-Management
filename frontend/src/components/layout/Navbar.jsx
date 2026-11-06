@@ -18,7 +18,7 @@ import {
   Receipt,
   Zap,
   CheckCircle2,
-  QrCode
+  Ticket
 } from 'lucide-react';
 import NotificationBell from '../notifications/NotificationBell';
 
@@ -59,7 +59,7 @@ const Navbar = () => {
       </div>
     ) },
     { label: 'Orders', path: '/orders', icon: <ClipboardList className="w-5 h-5" /> },
-    { label: 'Pickup', path: '/pickup', icon: <QrCode className="w-5 h-5" /> },
+    { label: 'Pickup', path: '/pickup', icon: <Ticket className="w-5 h-5" /> },
     { label: 'Profile', path: '/profile', icon: <User className="w-5 h-5" /> }
   ];
 
@@ -266,21 +266,28 @@ const Navbar = () => {
 
       {/* Customer Mobile Bottom Navigation: Visible ONLY when authenticated (Hidden on public landing page & admin) */}
       {Boolean(user && user.role !== 'admin' && user.role !== 'ADMIN') && (
-        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-primary-darker/98 backdrop-blur-md border-t border-white/10 z-40 h-16 pb-[env(safe-area-inset-bottom,0px)] px-2 shadow-2xl flex items-center justify-around">
-          {studentNavItems.map((item) => (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
-                isActive(item.path)
-                  ? 'text-amber scale-105 font-bold'
-                  : 'text-white/60 hover:text-white'
-              }`}
-            >
-              {item.icon}
-              <span className="text-[10px] font-medium mt-1">{item.label}</span>
-            </Link>
-          ))}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#072419] border-t-2 border-amber/40 z-50 h-[68px] pb-[env(safe-area-inset-bottom,6px)] pt-1.5 px-1 shadow-[0_-8px_25px_rgba(0,0,0,0.6)] flex items-center justify-around select-none">
+          {studentNavItems.map((item) => {
+            const active = isActive(item.path);
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`flex flex-col items-center justify-center flex-1 py-1 rounded-xl transition-all ${
+                  active
+                    ? 'text-amber font-black bg-white/10 shadow-xs scale-105'
+                    : 'text-white/80 hover:text-white hover:bg-white/5 font-semibold'
+                }`}
+              >
+                <div className={`${active ? 'text-amber drop-shadow-[0_1px_4px_rgba(245,158,11,0.5)]' : 'text-white/80'}`}>
+                  {item.icon}
+                </div>
+                <span className={`text-[10px] mt-0.5 tracking-tight ${active ? 'font-black text-amber' : 'font-medium text-white/80'}`}>
+                  {item.label}
+                </span>
+              </Link>
+            );
+          })}
         </div>
       )}
     </>

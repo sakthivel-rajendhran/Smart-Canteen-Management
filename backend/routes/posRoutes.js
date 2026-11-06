@@ -2,6 +2,7 @@ import express from 'express';
 import {
   createWalkInOrder,
   getReadyOrders,
+  getHandoverOrders,
   verifyAndHandoverOrder,
   getBillArchive,
   getBillById,
@@ -20,8 +21,9 @@ router.use(protect, adminOnly);
 // POS Counter Sales (Walk-in)
 router.post('/pos/orders', createWalkInOrder);
 
-// Ready for Pickup Queue & Verification
+// Ready for Pickup Queue & Handover Management
 router.get('/pos/ready-orders', getReadyOrders);
+router.get('/pos/handover-orders', getHandoverOrders);
 router.post('/pos/verify-pickup', verifyAndHandoverOrder);
 router.post('/orders/:id/verify-pickup', verifyAndHandoverOrder);
 

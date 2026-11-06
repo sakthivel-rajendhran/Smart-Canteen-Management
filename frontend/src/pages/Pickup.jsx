@@ -4,27 +4,22 @@ import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import {
-  QrCode,
   CheckCircle2,
   Clock,
   Sparkles,
   Receipt,
   RefreshCw,
   AlertCircle,
-  ExternalLink,
   ChevronRight,
   ShoppingBag,
-  Bell,
-  Check,
-  X,
   CreditCard,
   Banknote,
-  Tv,
+  MapPin,
 } from 'lucide-react';
 
 const STATUS_CONFIG = {
   Placed: {
-    label: 'PLACED',
+    label: 'ORDER PLACED',
     message: 'Order received. Kitchen will confirm shortly.',
     bg: 'bg-amber-50 text-amber-800 border-amber-200',
     indicator: 'bg-amber-500',
@@ -47,6 +42,18 @@ const STATUS_CONFIG = {
     bg: 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-500/20',
     indicator: 'bg-emerald-500 animate-ping',
   },
+  'Pickup Bill': {
+    label: 'PICKUP BILL',
+    message: 'Your food bill is ready! Please proceed to the canteen counter to collect your bill and meal.',
+    bg: 'bg-amber-100 text-amber-950 border-amber-400 ring-2 ring-amber-500/25',
+    indicator: 'bg-amber-500 animate-bounce',
+  },
+  'Handover Bill': {
+    label: 'HANDOVER BILL',
+    message: 'Food handed over and bill collected successfully. Thank you, enjoy your meal!',
+    bg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    indicator: 'bg-emerald-600',
+  },
   Completed: {
     label: 'COMPLETED',
     message: 'Order collected successfully.',
@@ -67,7 +74,6 @@ const Pickup = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('active'); // 'active' | 'ready' | 'completed' | 'all'
-  const [selectedQR, setSelectedQR] = useState(null); // Modal for expanded QR view
 
   const { socket } = useSocket();
 
@@ -122,32 +128,32 @@ const Pickup = () => {
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
       if (filter === 'active') {
-        return ['Placed', 'Confirmed', 'Preparing', 'Ready'].includes(o.status);
+        return ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Pickup Bill'].includes(o.status);
       }
       if (filter === 'ready') {
-        return o.status === 'Ready';
+        return o.status === 'Ready' || o.status === 'Pickup Bill';
       }
       if (filter === 'completed') {
-        return o.status === 'Completed';
+        return o.status === 'Handover Bill' || o.status === 'Completed';
       }
       return true; // 'all'
     });
   }, [orders, filter]);
 
   const readyOrdersCount = useMemo(() => {
-    return orders.filter((o) => o.status === 'Ready').length;
+    return orders.filter((o) => o.status === 'Ready' || o.status === 'Pickup Bill').length;
   }, [orders]);
 
   const activeOrdersCount = useMemo(() => {
-    return orders.filter((o) => ['Placed', 'Confirmed', 'Preparing', 'Ready'].includes(o.status)).length;
+    return orders.filter((o) => ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Pickup Bill'].includes(o.status)).length;
   }, [orders]);
 
   return (
     <div className="min-h-screen bg-stone-100/70 pb-24 font-inter text-text">
       
-      {/* Top Banner */}
+      {/* Top Banner (No Live Counter Screen button as required) */}
       <div className="bg-[#0b3d2e] text-white px-4 py-6 shadow-md border-b border-white/10">
-        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
           
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-2xl bg-amber text-[#0b3d2e] font-black text-2xl flex items-center justify-center shadow-md">
@@ -160,40 +166,26 @@ const Pickup = () => {
                 </h1>
                 {readyOrdersCount > 0 && (
                   <span className="bg-amber text-[#0b3d2e] font-black text-xs px-2.5 py-0.5 rounded-full animate-bounce shadow-sm">
-                    {readyOrdersCount} READY NOW
+                    {readyOrdersCount} READY AT COUNTER
                   </span>
                 )}
               </div>
               <p className="text-xs text-white/70">
-                Track your unique pickup tokens and show them at the counter for collection.
+                Show your unique pickup token at the counter for meal collection and bill receipt.
               </p>
             </div>
           </div>
 
-          {/* Quick Action: Open Public Counter Display & Refresh */}
-          <div className="flex items-center gap-2">
-            <Link
-              to="/pickup-display"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition border border-white/15"
-              title="Open public canteen counter TV screen"
-            >
-              <Tv className="w-4 h-4 text-amber" />
-              <span>Live Counter Screen</span>
-              <ExternalLink className="w-3 h-3 text-white/60" />
-            </Link>
-
-            <button
-              type="button"
-              onClick={fetchMyOrders}
-              disabled={loading}
-              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition border border-white/15"
-              title="Refresh Pickups"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber' : ''}`} />
-            </button>
-          </div>
+          {/* Quick Refresh Button */}
+          <button
+            type="button"
+            onClick={fetchMyOrders}
+            disabled={loading}
+            className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition border border-white/15"
+            title="Refresh Pickups"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber' : ''}`} />
+          </button>
 
         </div>
       </div>
@@ -205,7 +197,7 @@ const Pickup = () => {
           {[
             { id: 'active', label: `Active Pickups (${activeOrdersCount})` },
             { id: 'ready', label: `Ready for Pickup (${readyOrdersCount})` },
-            { id: 'completed', label: 'Collected Orders' },
+            { id: 'completed', label: 'Collected / Handover' },
             { id: 'all', label: `All Orders (${orders.length})` },
           ].map((tab) => (
             <button
@@ -254,7 +246,7 @@ const Pickup = () => {
             </h3>
             <p className="text-stone-500 text-xs max-w-sm mx-auto mb-6">
               {filter === 'active'
-                ? "You don't have any active orders right now. Order delicious authentic meals from our canteen menu!"
+                ? "You don't have any active orders right now. Order fresh meals from our canteen menu!"
                 : 'No orders match this filter.'}
             </p>
             <Link
@@ -274,9 +266,12 @@ const Pickup = () => {
                 : `DRS-${token}`;
 
               const isReady = order.status === 'Ready';
-              const isCompleted = order.status === 'Completed';
+              const isPickupBill = order.status === 'Pickup Bill';
+              const isHandoverBill = order.status === 'Handover Bill';
+              const isCompleted = order.status === 'Completed' || isHandoverBill;
               const isPreparing = order.status === 'Preparing';
-              const isCancelled = order.status === 'Cancelled';
+
+              const isHighlighted = isReady || isPickupBill;
 
               const statusMeta = STATUS_CONFIG[order.status] || STATUS_CONFIG.Placed;
 
@@ -292,30 +287,20 @@ const Pickup = () => {
                 hour12: true,
               });
 
-              // Dynamic QR Code data URL for verification at counter
-              const qrVerificationData = JSON.stringify({
-                orderCode: order.orderCode,
-                token: formattedToken,
-                secret: order.pickupSecret || '',
-              });
-              const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
-                qrVerificationData
-              )}&color=0b3d2e&bgcolor=ffffff`;
-
               return (
                 <div
                   key={order._id}
                   className={`bg-white rounded-3xl shadow-sm border transition-all overflow-hidden ${
-                    isReady
-                      ? 'border-2 border-emerald-500 ring-4 ring-emerald-500/15 shadow-xl'
+                    isHighlighted
+                      ? 'border-2 border-amber-500 ring-4 ring-amber-500/15 shadow-xl'
                       : 'border-stone-200 hover:border-stone-300'
                   }`}
                 >
-                  {/* Top Header of Card */}
+                  {/* Card Header */}
                   <div
                     className={`px-5 py-3.5 flex flex-wrap items-center justify-between gap-2 border-b ${
-                      isReady
-                        ? 'bg-emerald-500 text-white border-emerald-600'
+                      isHighlighted
+                        ? 'bg-amber-500 text-stone-950 font-bold border-amber-600'
                         : 'bg-stone-50/80 text-stone-700 border-stone-200'
                     }`}
                   >
@@ -333,8 +318,8 @@ const Pickup = () => {
                       {/* Status Badge */}
                       <span
                         className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full border flex items-center gap-1.5 ${
-                          isReady
-                            ? 'bg-white text-emerald-900 border-white shadow-xs'
+                          isHighlighted
+                            ? 'bg-[#072419] text-amber border-[#072419] shadow-xs'
                             : statusMeta.bg
                         }`}
                       >
@@ -344,45 +329,51 @@ const Pickup = () => {
                     </div>
                   </div>
 
-                  {/* Main Card Content */}
-                  <div className="p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  {/* Main Card Content (Clean professional layout without QR code) */}
+                  <div className="p-5 sm:p-6 flex flex-col md:flex-row items-stretch justify-between gap-6">
                     
-                    {/* Left: Pickup Token Callout & Status Message */}
-                    <div className="space-y-3 flex-1">
-                      <div>
-                        <span className="text-[10px] font-black uppercase tracking-widest text-stone-400 block mb-0.5">
-                          PICKUP TOKEN NUMBER
-                        </span>
-                        <div
-                          className={`font-outfit font-black tracking-tight flex items-baseline gap-2 ${
-                            isReady
-                              ? 'text-4xl sm:text-5xl text-emerald-700'
-                              : 'text-3xl sm:text-4xl text-[#0b3d2e]'
-                          }`}
-                        >
-                          <span>{formattedToken}</span>
-                          {isReady && (
-                            <span className="text-xs font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-md self-center">
-                              Ready for Collection
-                            </span>
-                          )}
+                    {/* Left: Prominent Pickup Token & Order Details */}
+                    <div className="space-y-4 flex-1">
+                      
+                      {/* Prominent Pickup Token Highlight */}
+                      <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <span className="text-[10px] font-black uppercase tracking-widest text-stone-400 block mb-0.5">
+                            YOUR UNIQUE PICKUP TOKEN
+                          </span>
+                          <div
+                            className={`font-outfit font-black tracking-tight ${
+                              isHighlighted
+                                ? 'text-4xl sm:text-5xl text-[#0b3d2e]'
+                                : 'text-3xl sm:text-4xl text-stone-800'
+                            }`}
+                          >
+                            {formattedToken}
+                          </div>
                         </div>
+
+                        {isHighlighted && (
+                          <div className="bg-amber-100 border border-amber-300 text-amber-950 px-3 py-1.5 rounded-xl text-xs font-black uppercase flex items-center gap-1.5 self-start sm:self-center shadow-xs">
+                            <span className="w-2 h-2 rounded-full bg-amber-600 animate-ping" />
+                            <span>Collect Meal at Counter</span>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Status Banner Message */}
+                      {/* Status Message Banner */}
                       <div
-                        className={`p-3 rounded-2xl text-xs font-semibold border flex items-start gap-2.5 ${
-                          isReady
-                            ? 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-xs'
+                        className={`p-3.5 rounded-2xl text-xs font-semibold border flex items-start gap-2.5 ${
+                          isHighlighted
+                            ? 'bg-amber-50 border-amber-300 text-amber-950 shadow-xs'
                             : isPreparing
                             ? 'bg-orange-50 border-orange-200 text-orange-950'
                             : isCompleted
-                            ? 'bg-stone-50 border-stone-200 text-stone-700'
-                            : 'bg-stone-50 border-stone-200 text-stone-600'
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                            : 'bg-stone-50 border-stone-200 text-stone-700'
                         }`}
                       >
-                        {isReady ? (
-                          <Sparkles className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5 animate-bounce" />
+                        {isHighlighted ? (
+                          <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5 animate-bounce" />
                         ) : isPreparing ? (
                           <Clock className="w-5 h-5 text-orange-600 shrink-0 mt-0.5 animate-spin" />
                         ) : isCompleted ? (
@@ -392,9 +383,9 @@ const Pickup = () => {
                         )}
                         <div>
                           <p className="font-bold">{statusMeta.message}</p>
-                          {isReady && (
-                            <p className="text-[11px] text-emerald-800 font-normal mt-0.5">
-                              Show this token number or scan the QR code at the counter.
+                          {isHighlighted && (
+                            <p className="text-[11px] text-amber-900 font-normal mt-0.5">
+                              Present token <strong>#{formattedToken}</strong> to the canteen staff at the collection counter.
                             </p>
                           )}
                         </div>
@@ -411,7 +402,7 @@ const Pickup = () => {
                               <span className="font-semibold truncate mr-2">
                                 {item.name}
                               </span>
-                              <span className="font-black font-mono text-stone-900 bg-white px-1.5 py-0.5 rounded border border-stone-200 text-[11px]">
+                              <span className="font-black font-mono text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200 text-[11px]">
                                 ×{item.quantity}
                               </span>
                             </div>
@@ -419,10 +410,10 @@ const Pickup = () => {
                         </div>
                       </div>
 
-                      {/* Financial info */}
-                      <div className="flex flex-wrap items-center justify-between text-xs pt-1 border-t border-stone-100">
+                      {/* Payment & Financial Row */}
+                      <div className="flex flex-wrap items-center justify-between text-xs pt-2 border-t border-stone-100">
                         <div className="flex items-center gap-2">
-                          <span className="text-stone-500 font-medium">Payment:</span>
+                          <span className="text-stone-500 font-medium">Payment Mode:</span>
                           <span className="font-bold uppercase text-stone-800 font-mono">
                             {order.paymentMethod} ({order.paymentStatus})
                           </span>
@@ -434,47 +425,27 @@ const Pickup = () => {
                           </span>
                         </div>
                       </div>
+
                     </div>
 
-                    {/* Right: QR Code for Verification & Quick Links */}
-                    <div className="flex flex-col items-center justify-center p-4 bg-stone-50 rounded-2xl border border-stone-200/80 w-full md:w-52 shrink-0">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-2 flex items-center gap-1">
-                        <QrCode className="w-3.5 h-3.5" /> Counter QR Token
-                      </span>
-
-                      {/* QR Image */}
-                      <div
-                        onClick={() => setSelectedQR({ token: formattedToken, url: qrUrl })}
-                        className="bg-white p-2 rounded-xl border border-stone-300 shadow-xs cursor-pointer hover:scale-105 transition-transform"
-                        title="Click to expand QR Code"
+                    {/* Right: Actions Column (Receipt & Live Tracker) */}
+                    <div className="flex flex-col justify-center gap-2.5 w-full md:w-56 shrink-0 border-t md:border-t-0 md:border-l border-stone-200 md:pl-6 pt-4 md:pt-0">
+                      
+                      <Link
+                        to={`/bill/${order.orderCode}`}
+                        className="w-full flex items-center justify-center gap-2 bg-[#0b3d2e] hover:bg-[#1a7a45] text-white font-bold text-xs py-3 px-4 rounded-xl shadow-md transition active:scale-95"
                       >
-                        <img
-                          src={qrUrl}
-                          alt={`QR for ${formattedToken}`}
-                          className="w-28 h-28 object-contain"
-                          loading="lazy"
-                        />
-                      </div>
-                      <span className="text-[10px] text-stone-400 font-mono mt-1.5">
-                        Tap to expand
-                      </span>
+                        <Receipt className="w-4 h-4 text-amber" />
+                        <span>View Receipt Bill</span>
+                      </Link>
 
-                      {/* Action Links */}
-                      <div className="w-full mt-3 space-y-1.5 pt-2 border-t border-stone-200">
-                        <Link
-                          to={`/bill/${order.orderCode}`}
-                          className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-stone-700 hover:text-[#0b3d2e] bg-white border border-stone-200 hover:border-[#0b3d2e] py-1.5 px-2 rounded-lg transition"
-                        >
-                          <Receipt className="w-3.5 h-3.5" />
-                          <span>View Receipt</span>
-                        </Link>
-                        <Link
-                          to={`/tracker/${order.orderCode}`}
-                          className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-[#0b3d2e] hover:bg-[#0b3d2e]/10 py-1.5 px-2 rounded-lg transition"
-                        >
-                          <span>Live Progress Tracker</span>
-                        </Link>
-                      </div>
+                      <Link
+                        to={`/tracker/${order.orderCode}`}
+                        className="w-full flex items-center justify-center gap-2 bg-white hover:bg-stone-100 text-stone-700 font-bold text-xs py-2.5 px-4 rounded-xl border border-stone-200 transition"
+                      >
+                        <MapPin className="w-4 h-4 text-[#0b3d2e]" />
+                        <span>Track Live Progress</span>
+                      </Link>
 
                     </div>
 
@@ -487,50 +458,6 @@ const Pickup = () => {
         )}
 
       </div>
-
-      {/* Expanded QR Code Modal */}
-      {selectedQR && (
-        <div className="fixed inset-0 z-50 bg-stone-900/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl p-6 max-w-xs w-full text-center shadow-2xl border border-stone-200 space-y-3">
-            <div className="flex justify-between items-center pb-2 border-b border-stone-100">
-              <span className="font-outfit font-black text-sm text-stone-900">
-                Token {selectedQR.token}
-              </span>
-              <button
-                type="button"
-                onClick={() => setSelectedQR(null)}
-                className="p-1 text-stone-400 hover:text-stone-700 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-stone-500">
-              Show this QR code at the canteen collection counter for instant scan and food handover.
-            </p>
-
-            <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200 inline-block shadow-inner">
-              <img
-                src={selectedQR.url}
-                alt="Enlarged QR Code"
-                className="w-48 h-48 mx-auto object-contain"
-              />
-            </div>
-
-            <div className="font-outfit font-black text-2xl text-[#0b3d2e] tracking-wider">
-              {selectedQR.token}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setSelectedQR(null)}
-              className="w-full bg-[#0b3d2e] text-white text-xs font-bold py-2 rounded-xl hover:bg-[#1a7a45] transition"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
 
     </div>
   );
