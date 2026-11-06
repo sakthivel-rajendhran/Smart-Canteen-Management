@@ -37,19 +37,17 @@ const FoodHandover = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
-  // Filter tabs: 'awaiting' | 'pending' | 'completed' | 'all'
-  const [activeTab, setActiveTab] = useState('awaiting');
+  // Filter tabs: 'pending' | 'completed' | 'all'
+  const [activeTab, setActiveTab] = useState('pending');
   const [searchTerm, setSearchTerm] = useState('');
-  const [stats, setStats] = useState({ awaiting: 0, pending: 0, completed: 0 });
+  const [stats, setStats] = useState({ pending: 0, completed: 0 });
 
   // Quick Verification Form Input at the top
   const [quickVerifyInput, setQuickVerifyInput] = useState('');
   const [verifying, setVerifying] = useState(false);
-  const [printingOrderId, setPrintingOrderId] = useState(null);
-  const [recordingPaymentId, setRecordingPaymentId] = useState(null);
 
   // Result Banner / Alert State
-  const [handoverResult, setHandoverResult] = useState(null); // { type: 'success' | 'duplicate' | 'error' | 'unpaid', message, order }
+  const [handoverResult, setHandoverResult] = useState(null); // { type: 'success' | 'duplicate' | 'error', message, order }
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Modals
@@ -60,7 +58,7 @@ const FoodHandover = () => {
   const audioCtxRef = useRef(null);
   const { socket, isConnected } = useSocket();
 
-  // Load orders when activeTab changes
+  // Load orders when activeTab or searchTerm changes (debounced search handled via submit/effect)
   useEffect(() => {
     fetchOrders(true);
   }, [activeTab]);
@@ -71,6 +69,7 @@ const FoodHandover = () => {
 
     const handleOrderEvent = (order) => {
       if (!order) return;
+      // Refresh list to keep counts and states perfectly synchronized
       fetchOrders(false);
     };
 
@@ -87,7 +86,7 @@ const FoodHandover = () => {
     };
   }, [socket, activeTab, searchTerm]);
 
-  // Audio alerts
+  // Audio chimes
   const playSound = (isSuccess) => {
     if (!soundEnabled) return;
     try {
@@ -103,13 +102,15 @@ const FoodHandover = () => {
       gain.connect(ctx.destination);
 
       if (isSuccess) {
-        osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1);
+        // High pleasant dual chime
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1); // A5
         gain.gain.setValueAtTime(0.2, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
         osc.start(ctx.currentTime);
         osc.stop(ctx.currentTime + 0.4);
       } else {
+        // Low double buzz alert
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(150, ctx.currentTime);
         gain.gain.setValueAtTime(0.3, ctx.currentTime);
@@ -118,7 +119,7 @@ const FoodHandover = () => {
         osc.stop(ctx.currentTime + 0.5);
       }
     } catch (e) {
-      // Audio not supported
+      // Audio not supported or blocked
     }
   };
 
@@ -152,7 +153,7 @@ const FoodHandover = () => {
     fetchOrders(true, searchTerm);
   };
 
-  // Perform bill / token verification from top search bar
+  // Perform quick verification directly from top bar
   const handleQuickVerifySubmit = async (e) => {
     e.preventDefault();
     const query = quickVerifyInput.trim();
@@ -162,141 +163,63 @@ const FoodHandover = () => {
       setVerifying(true);
       setHandoverResult(null);
 
-      // Verify or find order
-      const res = await API.get(`/admin/bills/${encodeURIComponent(query)}`);
-      if (res.data?.success && res.data.data) {
-        const orderData = res.data.data;
-        
-        // Check if already handed over
-        if (
-          orderData.status === 'Completed' ||
-          orderData.status === 'Handover Bill' ||
-          orderData.handoverVerified ||
-          orderData.handoverStatus === 'COMPLETED'
-        ) {
-          playSound(false);
-          setHandoverResult({
-            type: 'duplicate',
-            message: `Order #${orderData.orderCode} (Token #${orderData.pickupToken}) was already collected earlier!`,
-            order: orderData,
-          });
-          return;
-        }
+      const res = await API.post('/admin/pos/verify-pickup', { token: query });
 
-        // Check if unpaid
-        if (orderData.paymentStatus !== 'paid') {
-          playSound(false);
-          setHandoverResult({
-            type: 'unpaid',
-            message: `Order #${orderData.orderCode} has unpaid payment of ₹${orderData.total}. Collect payment before handover!`,
-            order: orderData,
-          });
-          return;
-        }
-
-        // Open Handover Confirmation Dialog for the verified order
+      if (res.data?.success) {
         playSound(true);
-        setQuickVerifyInput('');
-        setConfirmModal({
-          isOpen: true,
+        const orderData = res.data.data;
+        setHandoverResult({
+          type: 'success',
+          message: res.data.message || `Order verified & handed over successfully!`,
           order: orderData,
         });
+        setQuickVerifyInput('');
+
+        // Automatically open thermal receipt print for the verified order
+        if (orderData) {
+          setReceiptModal({
+            isOpen: true,
+            order: orderData,
+            autoPrint: true,
+          });
+        }
+
+        fetchOrders(false);
       }
     } catch (err) {
       playSound(false);
+      const isDuplicate = err.response?.status === 409 || err.response?.data?.alreadyCollected;
       setHandoverResult({
-        type: 'error',
-        message: err.response?.data?.message || `No active order found matching "${query}". Please check the physical bill.`,
+        type: isDuplicate ? 'duplicate' : 'error',
+        message:
+          err.response?.data?.message ||
+          'Order verification failed. Please check the token number.',
+        order: err.response?.data?.order,
       });
     } finally {
       setVerifying(false);
     }
   };
 
-  // BUTTON 1: Print Thermal Bill
-  // Generates bill, saves in MongoDB, opens browser print dialog, moves order into Awaiting Handover
-  const handlePrintBill = async (order) => {
-    try {
-      setPrintingOrderId(order._id);
-
-      // Payment validation
-      if (order.paymentStatus !== 'paid') {
-        alert(`Payment of ₹${order.total} has not been confirmed! Please record payment before printing the bill.`);
-        return;
-      }
-
-      const res = await API.post('/admin/pos/print-bill', {
-        orderId: order._id,
-        token: order.pickupToken || order.orderCode,
-        billNumber: order.billNumber,
-      });
-
-      if (res.data?.success) {
-        const updatedOrder = res.data.data;
-        // Update local state
-        setOrders((prev) =>
-          prev.map((o) => (o._id === order._id ? updatedOrder : o))
-        );
-
-        // Open thermal modal with autoPrint
-        setReceiptModal({
-          isOpen: true,
-          order: updatedOrder,
-          autoPrint: true,
-        });
-
-        // Refresh counts
-        fetchOrders(false);
-      }
-    } catch (err) {
-      console.error('Failed to print bill:', err);
-      alert(err.response?.data?.message || 'Failed to print physical thermal bill.');
-    } finally {
-      setPrintingOrderId(null);
-    }
-  };
-
-  // Record Cash Payment (e.g. for unpaid counter or COD orders)
-  const handleRecordPayment = async (order) => {
-    if (!window.confirm(`Confirm collection of ₹${order.total} in CASH from customer?`)) return;
-
-    try {
-      setRecordingPaymentId(order._id);
-      const res = await API.post('/admin/pos/record-payment', {
-        orderId: order._id,
-        paymentMethod: 'cash',
-      });
-
-      if (res.data?.success) {
-        const updatedOrder = res.data.data;
-        setOrders((prev) =>
-          prev.map((o) => (o._id === order._id ? updatedOrder : o))
-        );
-        fetchOrders(false);
-      }
-    } catch (err) {
-      alert(err.response?.data?.message || 'Failed to record payment.');
-    } finally {
-      setRecordingPaymentId(null);
-    }
-  };
-
-  // BUTTON 2: Open Physical Food Handover Confirmation Dialog
+  // Click Handover button on a card:
+  // Step 1: Open Thermal Bill Print
+  // Step 2: Show Physical Handover Confirmation Dialog
   const handleStartHandover = (order) => {
-    // If unpaid, alert employee
-    if (order.paymentStatus !== 'paid') {
-      alert(`Payment of ₹${order.total} has not been collected! Collect payment before handing over food.`);
-      return;
-    }
+    // 1. Trigger receipt print
+    setReceiptModal({
+      isOpen: true,
+      order,
+      autoPrint: true,
+    });
 
+    // 2. Open confirmation prompt
     setConfirmModal({
       isOpen: true,
       order,
     });
   };
 
-  // Confirm Food Handed Over inside Confirmation Dialog
-  // Updates order to COMPLETED, records exact handover timestamp, does NOT print another bill
+  // Click "Confirm Food Handed Over" inside Confirmation Dialog
   const handleConfirmHandover = async () => {
     const targetOrder = confirmModal.order;
     if (!targetOrder) return;
@@ -306,14 +229,13 @@ const FoodHandover = () => {
       const res = await API.post('/admin/pos/verify-pickup', {
         token: targetOrder.pickupToken || targetOrder.orderCode,
         orderId: targetOrder._id,
-        billNumber: targetOrder.billNumber,
       });
 
       if (res.data?.success) {
         playSound(true);
         setHandoverResult({
           type: 'success',
-          message: `Food physically handed over! Order #${targetOrder.orderCode} (Bill #${targetOrder.billNumber || 'BILL-' + targetOrder.orderCode}) marked as COMPLETED.`,
+          message: `Food physically handed over! Order #${targetOrder.orderCode} (Token #${targetOrder.pickupToken}) marked as Handover Bill.`,
           order: res.data.data || targetOrder,
         });
         setConfirmModal({ isOpen: false, order: null });
@@ -341,13 +263,13 @@ const FoodHandover = () => {
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
           
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber flex items-center justify-center text-stone-950 font-black text-xl shadow-xs">
+            <div className="w-10 h-10 rounded-2xl bg-amber flex items-center justify-center text-stone-950 font-black text-xl shadow-sm">
               🍛
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-outfit font-black text-base sm:text-lg tracking-tight">
-                  Food Handover & Bill Verification Counter
+                  Handover & Bill Printing Counter
                 </h1>
                 <span className="bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black uppercase px-2 py-0.5 rounded-full flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -355,7 +277,7 @@ const FoodHandover = () => {
                 </span>
               </div>
               <p className="text-[11px] text-white/70">
-                Verify physical bills • Print customer receipts • Confirm food collection • Prevent duplicates
+                Print POS thermal bills • Physical food collection confirmation • Anti-duplicate validation
               </p>
             </div>
           </div>
@@ -386,7 +308,7 @@ const FoodHandover = () => {
               to="/admin/pos"
               className="flex items-center gap-1.5 bg-amber hover:bg-amber-dark text-stone-950 font-bold text-xs px-3 py-2 rounded-xl transition shadow-xs"
             >
-              <span>+ POS Sale</span>
+              <span>POS Billing</span>
             </Link>
 
             <Link
@@ -414,10 +336,10 @@ const FoodHandover = () => {
           <form onSubmit={handleQuickVerifySubmit} className="max-w-3xl mx-auto">
             <div className="text-center mb-3">
               <span className="text-[11px] font-black uppercase tracking-wider text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
-                Food Collection Counter • Physical Bill Verification
+                Direct Counter Pickup & Bill Verification
               </span>
               <h2 className="font-outfit font-black text-xl sm:text-2xl text-stone-900 mt-1">
-                Scan or Enter Bill Number / Token to Handover Food
+                Enter Pickup Token to Verify & Print Bill
               </h2>
             </div>
 
@@ -426,7 +348,7 @@ const FoodHandover = () => {
                 <Search className="w-5 h-5 text-stone-400 absolute left-4 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Scan barcode or enter Bill # (BILL-DRS-1025), Token # (1025), or Order ID..."
+                  placeholder="Enter Token # (e.g. 1025) or Order ID (DRS-1025)..."
                   value={quickVerifyInput}
                   onChange={(e) => setQuickVerifyInput(e.target.value)}
                   className="w-full pl-12 pr-4 py-3.5 bg-stone-50 border-2 border-stone-200 rounded-2xl text-sm sm:text-base font-bold font-mono tracking-wider focus:outline-none focus:border-[#0b3d2e] focus:bg-white transition"
@@ -447,7 +369,7 @@ const FoodHandover = () => {
                 ) : (
                   <>
                     <ShieldCheck className="w-5 h-5 text-amber" />
-                    <span>Verify Physical Bill</span>
+                    <span>Verify & Print Bill</span>
                   </>
                 )}
               </button>
@@ -476,38 +398,13 @@ const FoodHandover = () => {
                         {handoverResult.message}
                       </p>
                       <p className="text-xs text-red-700 mt-1.5 font-bold">
-                        ⛔ DO NOT HAND OVER FOOD AGAIN. This bill / token has already been marked as collected.
+                        ⛔ DO NOT HAND OVER FOOD AGAIN. This token has already been marked as collected.
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => setHandoverResult(null)}
                       className="text-red-400 hover:text-red-700 p-1"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* UNPAID WARNING */}
-              {handoverResult.type === 'unpaid' && (
-                <div className="bg-amber-50 border-2 border-amber-500 rounded-2xl p-4 text-amber-900 shadow-md">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="w-7 h-7 text-amber-600 shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <span className="bg-amber-600 text-white font-black text-[10px] px-2 py-0.5 rounded uppercase tracking-wider">
-                        PAYMENT REQUIRED
-                      </span>
-                      <h3 className="font-outfit font-black text-base text-amber-950 mt-1">
-                        Payment Not Confirmed
-                      </h3>
-                      <p className="text-xs text-amber-800 mt-0.5">{handoverResult.message}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setHandoverResult(null)}
-                      className="text-amber-500 hover:text-amber-800 p-1"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -533,7 +430,7 @@ const FoodHandover = () => {
                         {handoverResult.message}
                       </p>
                       <p className="text-xs text-emerald-700 mt-1">
-                        Physical food verified & handed over. Order marked as <strong>COMPLETED</strong>. Live pickup display updated in real time.
+                        Physical food handed over. Status updated to <strong>Handover Bill</strong>. Customer tracker and live pickup display updated in real time.
                       </p>
                     </div>
                     <button
@@ -574,25 +471,6 @@ const FoodHandover = () => {
           
           {/* Filter Tabs */}
           <div className="flex items-center gap-1.5 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-            {/* Tab 1: Awaiting Handover */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('awaiting')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black transition-all ${
-                activeTab === 'awaiting'
-                  ? 'bg-[#0b3d2e] text-white shadow-xs'
-                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-              }`}
-            >
-              <span>Awaiting Handover</span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                activeTab === 'awaiting' ? 'bg-amber text-stone-950' : 'bg-stone-200 text-stone-700'
-              }`}>
-                {stats.awaiting}
-              </span>
-            </button>
-
-            {/* Tab 2: Pending Handover / Ready */}
             <button
               type="button"
               onClick={() => setActiveTab('pending')}
@@ -602,7 +480,7 @@ const FoodHandover = () => {
                   : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
               }`}
             >
-              <span>Pending Handover</span>
+              <span>Pending Handovers</span>
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                 activeTab === 'pending' ? 'bg-amber text-stone-950' : 'bg-stone-200 text-stone-700'
               }`}>
@@ -610,7 +488,6 @@ const FoodHandover = () => {
               </span>
             </button>
 
-            {/* Tab 3: Completed Handovers */}
             <button
               type="button"
               onClick={() => setActiveTab('completed')}
@@ -628,7 +505,6 @@ const FoodHandover = () => {
               </span>
             </button>
 
-            {/* Tab 4: All Orders */}
             <button
               type="button"
               onClick={() => setActiveTab('all')}
@@ -647,7 +523,7 @@ const FoodHandover = () => {
             <Search className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search by Bill #, Token #, Order ID..."
+              placeholder="Filter by token, name, ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-16 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#0b3d2e] focus:bg-white transition"
@@ -689,15 +565,13 @@ const FoodHandover = () => {
                 ✓
               </div>
               <h3 className="font-outfit font-black text-stone-900 text-lg mb-1">
-                {activeTab === 'awaiting'
-                  ? 'All Clear! No Orders Awaiting Food Handover'
-                  : activeTab === 'pending'
-                  ? 'No Pending Handovers'
+                {activeTab === 'pending'
+                  ? 'All Clear! No Pending Handovers'
                   : 'No Orders Found'}
               </h3>
               <p className="text-stone-500 text-xs max-w-md mx-auto">
-                {activeTab === 'awaiting'
-                  ? 'When customers pay and receive their printed bill at the counter, their order will automatically appear here for physical food verification and collection.'
+                {activeTab === 'pending'
+                  ? 'When the kitchen marks food as "Pickup Bill" or "Ready", it will automatically appear here for collection and thermal bill printing.'
                   : 'Try selecting a different filter tab or clearing your search filter.'}
               </p>
             </div>
@@ -706,8 +580,6 @@ const FoodHandover = () => {
               {orders.map((order) => {
                 const isWalkIn = order.orderType === 'WALK_IN';
                 const token = order.pickupToken || order.orderCode?.replace('DRS-', '');
-                const billNumber = order.billNumber || `BILL-${order.orderCode}`;
-                const isBillPrinted = order.billStatus === 'PRINTED' || order.billPrintCount > 0;
                 
                 // Customer identification
                 const customerName = isWalkIn
@@ -726,16 +598,10 @@ const FoodHandover = () => {
                   ? ''
                   : (order.user?.studentDetails?.department || order.user?.staffDetails?.department || '');
 
-                const isHandoverCompleted =
-                  order.handoverStatus === 'COMPLETED' ||
-                  order.status === 'Handover Bill' ||
-                  order.status === 'Completed' ||
-                  order.handoverVerified;
+                const isHandoverCompleted = order.status === 'Handover Bill' || order.status === 'Completed' || order.handoverVerified;
+                const isCodUnpaid = order.paymentMethod === 'cod' && order.paymentStatus !== 'paid';
 
-                const isPaid = order.paymentStatus === 'paid';
-                const isCodUnpaid = !isPaid;
-
-                const orderDate = new Date(order.billPrintedAt || order.createdAt || Date.now());
+                const orderDate = new Date(order.createdAt || Date.now());
                 const formattedTime = orderDate.toLocaleTimeString('en-IN', {
                   hour: '2-digit',
                   minute: '2-digit',
@@ -755,7 +621,7 @@ const FoodHandover = () => {
                         : 'border-stone-200 hover:border-[#0b3d2e] shadow-sm hover:shadow-md'
                     }`}
                   >
-                    {/* Top Callout: Token, Order Code, and Bill Number */}
+                    {/* Top Callout: Big Token & Badges */}
                     <div className="flex items-start justify-between gap-2 pb-3 border-b border-stone-100">
                       <div>
                         <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block">
@@ -766,10 +632,8 @@ const FoodHandover = () => {
                             #{token}
                           </span>
                         </div>
-                        <div className="text-[11px] font-mono text-stone-600 font-bold mt-0.5 flex flex-wrap items-center gap-1.5">
+                        <div className="text-[11px] font-mono text-stone-500 font-bold mt-0.5 flex items-center gap-1.5">
                           <span>Order #{order.orderCode}</span>
-                          <span>•</span>
-                          <span className="text-[#0b3d2e] font-black">{billNumber}</span>
                           <span>•</span>
                           <span className="text-stone-400 font-sans font-medium text-[10px]">
                             {formattedDate}, {formattedTime}
@@ -789,30 +653,18 @@ const FoodHandover = () => {
                           {isWalkIn ? '★ WALK-IN POS' : '★ ONLINE APP'}
                         </span>
 
-                        {/* Bill Status Badge */}
-                        {isBillPrinted ? (
-                          <span className="text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center gap-1">
-                            <Receipt className="w-3 h-3 text-emerald-600" />
-                            <span>Bill Printed</span>
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-bold uppercase bg-stone-100 text-stone-600 px-2 py-0.5 rounded-md">
-                            Pending Bill
-                          </span>
-                        )}
-
-                        {/* Handover Status Badge */}
+                        {/* Status Badge */}
                         {isHandoverCompleted ? (
                           <span className="text-[10px] font-black uppercase bg-emerald-600 text-white px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
-                            <CheckCheck className="w-3 h-3" /> Completed
+                            <CheckCheck className="w-3 h-3" /> HANDOVER BILL
                           </span>
-                        ) : isBillPrinted ? (
+                        ) : order.status === 'Pickup Bill' ? (
                           <span className="text-[10px] font-black uppercase bg-amber-500 text-stone-950 px-2 py-0.5 rounded-md shadow-2xs">
-                            Awaiting Handover
+                            PICKUP BILL
                           </span>
                         ) : (
-                          <span className="text-[10px] font-black uppercase bg-stone-200 text-stone-700 px-2 py-0.5 rounded-md">
-                            Ready
+                          <span className="text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300">
+                            READY FOR PICKUP
                           </span>
                         )}
                       </div>
@@ -905,30 +757,20 @@ const FoodHandover = () => {
                         <span className="text-[10px] uppercase font-bold text-stone-500 block">
                           Payment: {String(order.paymentMethod || 'cash').toUpperCase()}
                         </span>
-                        {isPaid ? (
+                        {isCodUnpaid ? (
+                          <span className="text-[11px] font-black text-red-600 bg-red-100 px-2 py-0.5 rounded inline-block mt-0.5">
+                            COLLECT CASH
+                          </span>
+                        ) : (
                           <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1 mt-0.5">
                             <Check className="w-3.5 h-3.5" /> PAID
                           </span>
-                        ) : (
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[10px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded">
-                              UNPAID
-                            </span>
-                            <button
-                              type="button"
-                              disabled={recordingPaymentId === order._id}
-                              onClick={() => handleRecordPayment(order)}
-                              className="text-[10px] font-bold text-stone-900 bg-amber hover:bg-amber-dark px-2 py-0.5 rounded transition shadow-2xs"
-                            >
-                              {recordingPaymentId === order._id ? 'Saving...' : 'Collect Cash & Mark Paid'}
-                            </button>
-                          </div>
                         )}
                       </div>
 
                       <div className="text-right">
                         <span className="text-[10px] uppercase font-bold text-stone-500 block">
-                          Total Amount
+                          Grand Total
                         </span>
                         <span className="font-outfit font-black text-lg text-stone-900">
                           ₹{Number(order.total || 0).toFixed(2)}
@@ -936,68 +778,40 @@ const FoodHandover = () => {
                       </div>
                     </div>
 
-                    {/* Action Buttons: Split BUTTON 1 (Print Bill) & BUTTON 2 (Handover Food) */}
+                    {/* Action Buttons */}
                     <div className="pt-1">
                       {isHandoverCompleted ? (
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-emerald-100/70 border border-emerald-200 text-emerald-900 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-between">
-                            <span className="flex items-center gap-1.5">
-                              <CheckCheck className="w-4 h-4 text-emerald-600" />
-                              <span>Food Handed Over</span>
-                            </span>
-                            <span className="text-[10px] text-emerald-700 font-mono">
-                              {order.handoverVerifiedAt || order.completedAt
-                                ? new Date(order.handoverVerifiedAt || order.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
-                                : 'Completed'}
-                            </span>
-                          </div>
-
                           <button
                             type="button"
                             onClick={() => setReceiptModal({ isOpen: true, order, autoPrint: false })}
-                            className="flex items-center justify-center gap-1 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs py-2 px-3 rounded-xl transition border border-stone-300 shrink-0"
-                            title="Reprint physical customer bill"
+                            className="flex-1 flex items-center justify-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs py-2.5 px-3 rounded-xl transition border border-stone-300"
                           >
                             <Printer className="w-3.5 h-3.5 text-stone-600" />
-                            <span>Reprint</span>
+                            <span>Reprint Thermal Bill</span>
                           </button>
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
-                          {/* BUTTON 1: PRINT BILL */}
+                          {/* Print Bill preview button */}
                           <button
                             type="button"
-                            disabled={printingOrderId === order._id || !isPaid}
-                            onClick={() => handlePrintBill(order)}
-                            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2.5 rounded-xl text-xs font-bold border transition ${
-                              !isPaid
-                                ? 'bg-stone-100 text-stone-400 border-stone-200 cursor-not-allowed'
-                                : isBillPrinted
-                                ? 'bg-stone-100 hover:bg-stone-200 text-stone-700 border-stone-300'
-                                : 'bg-amber/15 hover:bg-amber/25 text-stone-900 border-amber/40 shadow-2xs'
-                            }`}
-                            title={!isPaid ? 'Payment must be collected before printing bill' : 'Print physical thermal bill for customer'}
+                            onClick={() => setReceiptModal({ isOpen: true, order, autoPrint: false })}
+                            className="p-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl transition border border-stone-300"
+                            title="Preview / Print Bill Only"
                           >
-                            <Printer className={`w-3.5 h-3.5 text-stone-700 ${printingOrderId === order._id ? 'animate-spin' : ''}`} />
-                            <span>
-                              {printingOrderId === order._id
-                                ? 'Printing...'
-                                : isBillPrinted
-                                ? 'Reprint Bill'
-                                : 'Print Bill'}
-                            </span>
+                            <Printer className="w-4 h-4" />
                           </button>
 
-                          {/* BUTTON 2: HANDOVER FOOD */}
+                          {/* Primary Handover & Print Button */}
                           <button
                             type="button"
-                            disabled={verifying || !isPaid}
+                            disabled={verifying}
                             onClick={() => handleStartHandover(order)}
-                            className="flex-1 flex items-center justify-center gap-1.5 bg-[#0b3d2e] hover:bg-[#1a7a45] active:scale-95 disabled:opacity-50 text-white font-black text-xs py-2.5 px-2.5 rounded-xl shadow-xs transition"
-                            title="Verify physical bill and confirm food collection"
+                            className="flex-1 flex items-center justify-center gap-2 bg-[#0b3d2e] hover:bg-[#1a7a45] active:scale-95 text-white font-black text-xs py-2.5 px-3 rounded-xl shadow transition"
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5 text-amber" />
-                            <span>Handover Food</span>
+                            <Sparkles className="w-3.5 h-3.5 text-amber" />
+                            <span>Handover Food & Print Bill</span>
                           </button>
                         </div>
                       )}
@@ -1024,10 +838,10 @@ const FoodHandover = () => {
                 </div>
                 <div>
                   <h3 className="font-outfit font-black text-lg text-stone-900 leading-tight">
-                    Confirm Food Handover
+                    Confirm Physical Handover
                   </h3>
                   <p className="text-xs text-stone-500 font-medium">
-                    Order #{confirmModal.order.orderCode} • {confirmModal.order.billNumber || 'BILL-' + confirmModal.order.orderCode}
+                    Order #{confirmModal.order.orderCode}
                   </p>
                 </div>
               </div>
@@ -1056,30 +870,32 @@ const FoodHandover = () => {
               </div>
             </div>
 
-            {/* Bill & Items Verification Checklist */}
-            <div className="bg-stone-50 p-3 rounded-xl border border-stone-200 text-xs space-y-2">
-              <div className="flex justify-between items-center pb-1 border-b border-stone-200">
-                <span className="text-[10px] font-bold uppercase text-stone-400">
-                  Verify Items Against Physical Bill ({confirmModal.order.items?.length || 0})
-                </span>
-                <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded">
-                  PAID ₹{confirmModal.order.total}
-                </span>
+            {/* Unpaid Warning if applicable */}
+            {confirmModal.order.paymentMethod === 'cod' && confirmModal.order.paymentStatus !== 'paid' && (
+              <div className="bg-red-50 border-2 border-red-500 rounded-xl p-3 text-red-900 text-xs flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="block font-black">COLLECT CASH PAYMENT</strong>
+                  <span>Please collect <strong>₹{confirmModal.order.total}</strong> in cash from the customer before handing over the food trays!</span>
+                </div>
               </div>
-              <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                {confirmModal.order.items?.map((item, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-stone-800">
-                    <span className="truncate font-medium">{item.name}</span>
-                    <span className="font-black font-mono bg-white px-2 py-0.5 rounded border border-stone-200">
-                      ×{item.quantity}
-                    </span>
-                  </div>
-                ))}
-              </div>
+            )}
+
+            {/* Items summary */}
+            <div className="bg-stone-50 p-3 rounded-xl border border-stone-200 text-xs space-y-1 max-h-36 overflow-y-auto">
+              <span className="text-[10px] font-bold uppercase text-stone-400 block mb-1">
+                Handover Items ({confirmModal.order.items?.length || 0})
+              </span>
+              {confirmModal.order.items?.map((item, idx) => (
+                <div key={idx} className="flex justify-between items-center text-stone-800">
+                  <span className="truncate">{item.name}</span>
+                  <span className="font-black font-mono">×{item.quantity}</span>
+                </div>
+              ))}
             </div>
 
-            <p className="text-[11px] text-stone-600 text-center font-medium bg-stone-100 p-2.5 rounded-xl">
-              ✓ I have verified the customer's physical bill and handed over all food items.
+            <p className="text-[11px] text-stone-500 text-center">
+              Has the customer arrived at the counter and physically received all food items?
             </p>
 
             {/* Modal Actions */}
@@ -1101,7 +917,13 @@ const FoodHandover = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handlePrintBill(confirmModal.order)}
+                  onClick={() => {
+                    setReceiptModal({
+                      isOpen: true,
+                      order: confirmModal.order,
+                      autoPrint: true,
+                    });
+                  }}
                   className="flex-1 flex items-center justify-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs py-2.5 px-3 rounded-xl border border-stone-300 transition"
                 >
                   <Printer className="w-3.5 h-3.5" />
