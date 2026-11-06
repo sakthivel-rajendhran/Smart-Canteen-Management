@@ -3,6 +3,7 @@ import {
   getMenuItems,
   getMenuItemById,
   checkMenuItems,
+  uploadStandaloneImage,
   createMenuItem,
   updateMenuItem,
   deleteMenuItem,
@@ -20,6 +21,9 @@ router.route('/')
   .get(getMenuItems)
   .post(protect, adminOnly, upload.single('image'), createMenuItem);
 
+// Dedicated endpoint to upload standalone food image to Cloudinary (returns { url, publicId, format })
+router.post('/upload-image', protect, adminOnly, upload.single('image'), uploadStandaloneImage);
+
 // Lightweight batch availability/price check for checkout
 router.post('/check', checkMenuItems);
 
@@ -30,7 +34,7 @@ router.route('/:id')
 
 router.patch('/:id/availability', protect, adminOnly, toggleAvailability);
 
-// Dedicated endpoints for image upload and removal
+// Dedicated endpoints for image upload and removal on existing menu item
 router.route('/:id/image')
   .post(protect, adminOnly, upload.single('image'), uploadMenuImage)
   .delete(protect, adminOnly, deleteMenuImage);

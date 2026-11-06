@@ -9,7 +9,7 @@ import {
 } from '../config/cloudinary.js';
 
 // Helper to normalize image structure for backward compatibility
-// When isList is true, huge base64 data URIs are stripped to keep list payloads minimal
+// When isList is true, huge legacy base64 data URIs are stripped to keep list payloads minimal
 const normalizeMenuItemImage = (item, isList = false) => {
   const plain = item.toObject ? item.toObject() : { ...item };
   if (!plain.image || typeof plain.image === 'string') {
@@ -155,10 +155,65 @@ const checkMenuItems = async (req, res) => {
   }
 };
 
+// @desc    Standalone food image upload to Cloudinary
+// @route   POST /api/menu/upload-image or POST /api/admin/menu/upload-image
+// @access  Private/Admin
+const uploadStandaloneImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No image file provided. Please attach a JPG, PNG, or WEBP image up to 5 MB.',
+      });
+    }
+
+    if (!isCloudinaryConfigured()) {
+      return res.status(500).json({
+        success: false,
+        message: 'Cloudinary credentials are not configured on the server. Please add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in the environment settings.',
+      });
+    }
+
+    let folderName = 'general';
+    if (req.body.category) {
+      try {
+        if (mongoose.Types.ObjectId.isValid(req.body.category)) {
+          const catDoc = await Category.findById(req.body.category).lean();
+          if (catDoc?.name) folderName = catDoc.name.toLowerCase().trim();
+        } else {
+          folderName = String(req.body.category).toLowerCase().trim();
+        }
+      } catch {
+        folderName = 'general';
+      }
+    }
+
+    const uploadResult = await uploadToCloudinary(req.file.buffer, { folder: folderName });
+
+    res.status(200).json({
+      success: true,
+      message: 'Food image uploaded successfully',
+      image: {
+        url: uploadResult.url,
+        publicId: uploadResult.publicId,
+        format: uploadResult.format,
+      },
+    });
+  } catch (error) {
+    console.error('[CLOUDINARY UPLOAD ERROR]:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to upload image to Cloudinary.',
+    });
+  }
+};
+
 // @desc    Create a menu item
 // @route   POST /api/menu
 // @access  Private/Admin
 const createMenuItem = async (req, res) => {
+  let uploadedPublicId = null;
+
   try {
     const {
       name,
@@ -171,6 +226,7 @@ const createMenuItem = async (req, res) => {
       featured,
       preparationTime,
       imageUrl,
+      imagePublicId,
     } = req.body;
 
     if (!name || !category || !price) {
@@ -190,9 +246,10 @@ const createMenuItem = async (req, res) => {
 
     let imageData = {
       url: imageUrl || '',
-      publicId: '',
+      publicId: imagePublicId || '',
     };
 
+    // If file was directly attached via multipart form
     if (req.file) {
       if (isCloudinaryConfigured()) {
         const uploadResult = await uploadToCloudinary(req.file.buffer, { folder: folderName });
@@ -200,28 +257,36 @@ const createMenuItem = async (req, res) => {
           url: uploadResult.url,
           publicId: uploadResult.publicId,
         };
+        uploadedPublicId = uploadResult.publicId;
       } else {
-        // Fallback to data URI if Cloudinary credentials not yet set in .env
-        const base64 = req.file.buffer.toString('base64');
-        imageData = {
-          url: `data:${req.file.mimetype};base64,${base64}`,
-          publicId: '',
-        };
+        return res.status(500).json({
+          success: false,
+          message: 'Cloudinary is not configured. Please configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
+        });
       }
     }
 
-    const menuItem = await MenuItem.create({
-      name: name.trim(),
-      category,
-      description: description ? description.trim() : '',
-      price: Number(price),
-      image: imageData,
-      emoji: emoji || '🍛',
-      backgroundColor: backgroundColor || '#fff',
-      available: available !== undefined ? (available === 'true' || available === true) : true,
-      featured: featured === 'true' || featured === true,
-      preparationTime: preparationTime ? Number(preparationTime) : 10,
-    });
+    let menuItem;
+    try {
+      menuItem = await MenuItem.create({
+        name: name.trim(),
+        category,
+        description: description ? description.trim() : '',
+        price: Number(price),
+        image: imageData,
+        emoji: emoji || '🍛',
+        backgroundColor: backgroundColor || '#fff',
+        available: available !== undefined ? (available === 'true' || available === true) : true,
+        featured: featured === 'true' || featured === true,
+        preparationTime: preparationTime ? Number(preparationTime) : 10,
+      });
+    } catch (dbError) {
+      // Handle orphan cleanup: if upload succeeded but DB save failed, delete from Cloudinary
+      if (uploadedPublicId) {
+        await deleteCloudinaryAsset(uploadedPublicId);
+      }
+      throw dbError;
+    }
 
     const populatedItem = await MenuItem.findById(menuItem._id).populate('category');
     const normalizedItem = normalizeMenuItemImage(populatedItem);
@@ -248,6 +313,8 @@ const createMenuItem = async (req, res) => {
 // @route   PUT /api/menu/:id
 // @access  Private/Admin
 const updateMenuItem = async (req, res) => {
+  let newUploadedPublicId = null;
+
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(404).json({ success: false, message: 'Menu item not found' });
@@ -264,6 +331,8 @@ const updateMenuItem = async (req, res) => {
       featured,
       preparationTime,
       imageUrl,
+      imagePublicId,
+      removeImage,
     } = req.body;
 
     const menuItem = await MenuItem.findById(req.params.id);
@@ -271,46 +340,47 @@ const updateMenuItem = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Menu item not found' });
     }
 
+    const oldPublicId = menuItem.image?.publicId || '';
     let imageData = menuItem.image || { url: '', publicId: '' };
     if (typeof imageData === 'string') {
       imageData = { url: imageData, publicId: '' };
     }
 
-    if (imageUrl !== undefined && imageUrl !== '') {
-      imageData.url = imageUrl;
-    }
-
-    // If new image file is uploaded, replace existing Cloudinary asset
+    // Handle Scenario B & C: New file upload or removal
     if (req.file) {
       let folderName = 'general';
       const targetCatId = category || menuItem.category;
       try {
         const catDoc = await Category.findById(targetCatId);
-        if (catDoc && catDoc.name) {
+        if (catDoc?.name) {
           folderName = catDoc.name.toLowerCase().trim();
         }
       } catch {
-        // use default folder
-      }
-
-      // Delete old Cloudinary asset if one exists
-      if (imageData.publicId) {
-        await deleteCloudinaryAsset(imageData.publicId);
+        folderName = 'general';
       }
 
       if (isCloudinaryConfigured()) {
         const uploadResult = await uploadToCloudinary(req.file.buffer, { folder: folderName });
+        newUploadedPublicId = uploadResult.publicId;
         imageData = {
           url: uploadResult.url,
           publicId: uploadResult.publicId,
         };
       } else {
-        const base64 = req.file.buffer.toString('base64');
-        imageData = {
-          url: `data:${req.file.mimetype};base64,${base64}`,
-          publicId: '',
-        };
+        return res.status(500).json({
+          success: false,
+          message: 'Cloudinary is not configured. Please configure CLOUDINARY credentials in environment variables.',
+        });
       }
+    } else if (removeImage === 'true' || removeImage === true) {
+      // Scenario C: Admin explicitly removed the image
+      imageData = { url: '', publicId: '' };
+    } else if (imageUrl !== undefined) {
+      // If image URL / publicId passed via upload-image workflow
+      imageData = {
+        url: imageUrl,
+        publicId: imagePublicId || imageData.publicId || '',
+      };
     }
 
     if (name !== undefined) menuItem.name = name.trim();
@@ -324,7 +394,22 @@ const updateMenuItem = async (req, res) => {
     if (featured !== undefined) menuItem.featured = featured === 'true' || featured === true;
     if (preparationTime !== undefined) menuItem.preparationTime = Number(preparationTime);
 
-    await menuItem.save();
+    try {
+      await menuItem.save();
+    } catch (saveError) {
+      // If DB update fails, delete the new image from Cloudinary so we don't leave an orphan
+      if (newUploadedPublicId) {
+        await deleteCloudinaryAsset(newUploadedPublicId);
+      }
+      throw saveError;
+    }
+
+    // CRITICAL: Only after database update succeeds, delete previous Cloudinary asset
+    if (newUploadedPublicId && oldPublicId && oldPublicId !== newUploadedPublicId) {
+      await deleteCloudinaryAsset(oldPublicId);
+    } else if ((removeImage === 'true' || removeImage === true) && oldPublicId) {
+      await deleteCloudinaryAsset(oldPublicId);
+    }
 
     const populatedItem = await MenuItem.findById(menuItem._id).populate('category');
     const normalizedItem = normalizeMenuItemImage(populatedItem);
@@ -361,13 +446,19 @@ const deleteMenuItem = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Menu item not found' });
     }
 
-    // Delete image from Cloudinary if publicId exists
     const publicId = menuItem.image?.publicId;
-    if (publicId) {
-      await deleteCloudinaryAsset(publicId);
-    }
 
+    // Delete item from MongoDB first
     await menuItem.deleteOne();
+
+    // Safely delete image from Cloudinary if publicId exists
+    if (publicId) {
+      try {
+        await deleteCloudinaryAsset(publicId);
+      } catch (cloudErr) {
+        console.error(`[CLOUDINARY] Failed to clean up asset for deleted item ${req.params.id}:`, cloudErr);
+      }
+    }
 
     // Broadcast real-time event via Socket.IO
     const io = req.app.get('socketio');
@@ -438,35 +529,35 @@ const uploadMenuImage = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please provide an image file' });
     }
 
+    if (!isCloudinaryConfigured()) {
+      return res.status(500).json({
+        success: false,
+        message: 'Cloudinary is not configured. Please configure CLOUDINARY credentials in environment variables.',
+      });
+    }
+
     const menuItem = await MenuItem.findById(req.params.id).populate('category');
     if (!menuItem) {
       return res.status(404).json({ success: false, message: 'Menu item not found' });
     }
 
     const folderName = menuItem.category?.name ? menuItem.category.name.toLowerCase().trim() : 'general';
+    const oldPublicId = menuItem.image?.publicId;
 
-    // Delete old Cloudinary asset if present
-    if (menuItem.image?.publicId) {
-      await deleteCloudinaryAsset(menuItem.image.publicId);
-    }
+    // Upload new image first
+    const uploadResult = await uploadToCloudinary(req.file.buffer, { folder: folderName });
+    const newImageData = {
+      url: uploadResult.url,
+      publicId: uploadResult.publicId,
+    };
 
-    let imageData = { url: '', publicId: '' };
-    if (isCloudinaryConfigured()) {
-      const uploadResult = await uploadToCloudinary(req.file.buffer, { folder: folderName });
-      imageData = {
-        url: uploadResult.url,
-        publicId: uploadResult.publicId,
-      };
-    } else {
-      const base64 = req.file.buffer.toString('base64');
-      imageData = {
-        url: `data:${req.file.mimetype};base64,${base64}`,
-        publicId: '',
-      };
-    }
-
-    menuItem.image = imageData;
+    menuItem.image = newImageData;
     await menuItem.save();
+
+    // After DB update succeeds, delete previous asset from Cloudinary
+    if (oldPublicId && oldPublicId !== uploadResult.publicId) {
+      await deleteCloudinaryAsset(oldPublicId);
+    }
 
     const normalizedItem = normalizeMenuItemImage(menuItem);
 
@@ -501,12 +592,14 @@ const deleteMenuImage = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Menu item not found' });
     }
 
-    if (menuItem.image?.publicId) {
-      await deleteCloudinaryAsset(menuItem.image.publicId);
-    }
+    const oldPublicId = menuItem.image?.publicId;
 
     menuItem.image = { url: '', publicId: '' };
     await menuItem.save();
+
+    if (oldPublicId) {
+      await deleteCloudinaryAsset(oldPublicId);
+    }
 
     const normalizedItem = normalizeMenuItemImage(menuItem);
 
@@ -531,6 +624,7 @@ export {
   getMenuItems,
   getMenuItemById,
   checkMenuItems,
+  uploadStandaloneImage,
   createMenuItem,
   updateMenuItem,
   deleteMenuItem,

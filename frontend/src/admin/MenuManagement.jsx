@@ -54,8 +54,10 @@ const MenuManagement = () => {
   const [formAvailable, setFormAvailable] = useState(true);
   const [formImageFile, setFormImageFile] = useState(null);
   const [formImagePreview, setFormImagePreview] = useState(null);
+  const [formRemoveImage, setFormRemoveImage] = useState(false);
   const [formValidationMsg, setFormValidationMsg] = useState('');
   const [formLoading, setFormLoading] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState('');
 
   // Drag & drop highlight state
   const [isDragging, setIsDragging] = useState(false);
@@ -148,16 +150,17 @@ const MenuManagement = () => {
 
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
-      setFormValidationMsg('Please upload a valid image (JPG, JPEG, PNG, or WEBP).');
+      setFormValidationMsg('Invalid file format. Please upload a JPG, JPEG, PNG, or WEBP image.');
       return;
     }
 
     const maxSize = 5 * 1024 * 1024; // 5 MB
     if (file.size > maxSize) {
-      setFormValidationMsg('Image size must be below 5 MB.');
+      setFormValidationMsg(`Image size (${(file.size / (1024 * 1024)).toFixed(2)} MB) exceeds maximum limit of 5 MB.`);
       return;
     }
 
+    setFormRemoveImage(false);
     setFormImageFile(file);
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -194,6 +197,8 @@ const MenuManagement = () => {
     setFormAvailable(true);
     setFormImageFile(null);
     setFormImagePreview(null);
+    setFormRemoveImage(false);
+    setUploadProgressText('');
     setFormValidationMsg('');
   };
 
@@ -215,6 +220,8 @@ const MenuManagement = () => {
     setFormFeatured(Boolean(item.featured));
     setFormAvailable(item.available !== false);
     setFormImageFile(null);
+    setFormRemoveImage(false);
+    setUploadProgressText('');
     setFormImagePreview(item.image?.url || (typeof item.image === 'string' ? item.image : '') || null);
     setFormValidationMsg('');
   };
@@ -224,7 +231,9 @@ const MenuManagement = () => {
     e.preventDefault();
     setSuccess('');
     setError('');
+    setFormValidationMsg('');
     setFormLoading(true);
+    setUploadProgressText(formImageFile ? 'Uploading food image to Cloudinary...' : 'Saving food details...');
 
     try {
       const formData = new FormData();
@@ -242,7 +251,7 @@ const MenuManagement = () => {
 
       const response = await API.post('/menu', formData);
       if (response.data?.success) {
-        setSuccess(`✓ Food added successfully! "${formName}" is now active on the menu.`);
+        setSuccess(`✓ Food added successfully! "${formName}" with Cloudinary image is now active on the menu.`);
         setIsAddModalOpen(false);
         resetForm();
         fetchData();
@@ -251,6 +260,7 @@ const MenuManagement = () => {
       setFormValidationMsg(err.response?.data?.message || 'Failed to create food item.');
     } finally {
       setFormLoading(false);
+      setUploadProgressText('');
     }
   };
 
@@ -260,7 +270,9 @@ const MenuManagement = () => {
     if (!editingItem) return;
     setSuccess('');
     setError('');
+    setFormValidationMsg('');
     setFormLoading(true);
+    setUploadProgressText(formImageFile ? 'Uploading replacement image to Cloudinary...' : 'Updating menu item...');
 
     try {
       const formData = new FormData();
@@ -274,11 +286,13 @@ const MenuManagement = () => {
 
       if (formImageFile) {
         formData.append('image', formImageFile);
+      } else if (formRemoveImage) {
+        formData.append('removeImage', 'true');
       }
 
       const response = await API.put(`/menu/${editingItem._id}`, formData);
       if (response.data?.success) {
-        setSuccess(`✓ Food updated successfully! "${formName}" details have been saved.`);
+        setSuccess(`✓ Food updated successfully! "${formName}" details and image have been updated.`);
         setEditingItem(null);
         resetForm();
         fetchData();
@@ -287,6 +301,7 @@ const MenuManagement = () => {
       setFormValidationMsg(err.response?.data?.message || 'Failed to update food item.');
     } finally {
       setFormLoading(false);
+      setUploadProgressText('');
     }
   };
 
@@ -998,15 +1013,16 @@ const MenuManagement = () => {
                 </div>
               </div>
 
-              {/* Section 7: Drag & Drop Image Upload Box */}
+              {/* Section 7: Food Image (Cloudinary Upload) */}
               <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
-                  Food Photography (Cloudinary)
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                  <span>Food Image</span>
+                  <span className="text-primary font-semibold">Automatic Cloudinary Storage</span>
                 </label>
                 {formImagePreview ? (
                   /* Preview Box */
                   <div className="relative border-2 border-dashed border-primary/40 rounded-2xl p-4 bg-primary-light/20 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div className="w-16 h-16 rounded-xl overflow-hidden border border-border shadow-inner flex-shrink-0 bg-white">
                         <img
                           src={formImagePreview}
@@ -1014,20 +1030,22 @@ const MenuManagement = () => {
                           className="w-full h-full object-cover"
                         />
                       </div>
-                      <div>
-                        <span className="text-xs font-bold text-primary-dark block">✓ Ready to Upload</span>
-                        <span className="text-[10px] text-muted block">
-                          {formImageFile ? `${(formImageFile.size / (1024 * 1024)).toFixed(2)} MB` : 'Current Image'}
+                      <div className="min-w-0">
+                        <span className="text-xs font-bold text-primary-dark block truncate">
+                          {formImageFile ? formImageFile.name : 'Selected Food Image'}
+                        </span>
+                        <span className="text-[10px] text-muted block mt-0.5">
+                          {formImageFile ? `${(formImageFile.size / (1024 * 1024)).toFixed(2)} MB • Ready to Upload` : 'Stored image'}
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-shrink-0">
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
                         className="text-xs font-bold text-primary hover:underline px-2 py-1"
                       >
-                        Change
+                        Replace
                       </button>
                       <button
                         type="button"
@@ -1061,10 +1079,10 @@ const MenuManagement = () => {
                       Upload Food Image
                     </span>
                     <span className="text-[11px] text-muted block mb-1">
-                      Drag & Drop or <span className="text-primary font-bold underline">Browse</span>
+                      Drag & Drop or <span className="text-primary font-bold underline">Browse from Device</span>
                     </span>
                     <span className="text-[10px] text-gray-400 block font-mono">
-                      JPG / PNG / WEBP • Max 5 MB
+                      JPG, JPEG, PNG, WEBP • Max 5 MB
                     </span>
                   </div>
                 )}
@@ -1081,11 +1099,21 @@ const MenuManagement = () => {
                 />
               </div>
 
+              {/* Upload Progress Indicator */}
+              {formLoading && (
+                <div className="bg-primary-light/30 border border-primary/20 rounded-xl p-3 flex items-center gap-3">
+                  <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <span className="text-xs text-primary-dark font-semibold">
+                    {uploadProgressText || 'Uploading to Cloudinary & saving to database...'}
+                  </span>
+                </div>
+              )}
+
               <div className="pt-2">
                 <button
                   type="submit"
                   disabled={formLoading}
-                  className="w-full bg-primary-dark hover:bg-primary text-white font-outfit font-bold text-sm py-3.5 rounded-xl transition-all shadow-md active:scale-98 disabled:bg-gray-400"
+                  className="w-full bg-primary-dark hover:bg-primary text-white font-outfit font-bold text-sm py-3.5 rounded-xl transition-all shadow-md active:scale-98 disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >
                   {formLoading ? 'Uploading & Creating...' : 'Add Food to Canteen Menu'}
                 </button>
@@ -1219,14 +1247,15 @@ const MenuManagement = () => {
                 </div>
               </div>
 
-              {/* Replace Image Box */}
+              {/* Replace / Remove Image Box */}
               <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
-                  Food Image (Replace or keep current)
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                  <span>Food Image</span>
+                  <span className="text-primary font-semibold">Cloudinary Storage</span>
                 </label>
                 {formImagePreview ? (
                   <div className="relative border-2 border-dashed border-primary/40 rounded-2xl p-4 bg-primary-light/20 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div className="w-16 h-16 rounded-xl overflow-hidden border border-border shadow-inner flex-shrink-0 bg-white">
                         <img
                           src={formImagePreview}
@@ -1234,26 +1263,29 @@ const MenuManagement = () => {
                           className="w-full h-full object-cover"
                         />
                       </div>
-                      <div>
-                        <span className="text-xs font-bold text-primary-dark block">Current Food Image</span>
-                        <span className="text-[10px] text-muted block">
-                          {formImageFile ? 'New file ready to upload' : 'Stored in database'}
+                      <div className="min-w-0">
+                        <span className="text-xs font-bold text-primary-dark block truncate">
+                          {formImageFile ? formImageFile.name : (editingItem.image?.url ? 'Current Cloudinary Image' : 'Selected Image')}
+                        </span>
+                        <span className="text-[10px] text-muted block mt-0.5">
+                          {formImageFile ? `${(formImageFile.size / (1024 * 1024)).toFixed(2)} MB • Ready to Upload` : 'Stored in database'}
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-shrink-0">
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
                         className="text-xs font-bold text-primary hover:underline px-2 py-1"
                       >
-                        Change
+                        Replace
                       </button>
                       <button
                         type="button"
                         onClick={() => {
                           setFormImageFile(null);
                           setFormImagePreview(null);
+                          setFormRemoveImage(true);
                         }}
                         className="text-xs font-bold text-red-600 hover:underline px-2 py-1"
                       >
@@ -1275,8 +1307,11 @@ const MenuManagement = () => {
                     <span className="text-xs font-bold text-primary-dark block">
                       Upload New Image
                     </span>
-                    <span className="text-[10px] text-muted block font-mono">
-                      JPG, PNG, WEBP • Max 5 MB
+                    <span className="text-[11px] text-muted block mb-1">
+                      Drag & Drop or <span className="text-primary font-bold underline">Browse from Device</span>
+                    </span>
+                    <span className="text-[10px] text-gray-400 block font-mono">
+                      JPG, JPEG, PNG, WEBP • Max 5 MB
                     </span>
                   </div>
                 )}
@@ -1293,11 +1328,21 @@ const MenuManagement = () => {
                 />
               </div>
 
+              {/* Upload Progress Indicator */}
+              {formLoading && (
+                <div className="bg-primary-light/30 border border-primary/20 rounded-xl p-3 flex items-center gap-3">
+                  <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <span className="text-xs text-primary-dark font-semibold">
+                    {uploadProgressText || 'Updating Cloudinary asset & saving changes...'}
+                  </span>
+                </div>
+              )}
+
               <div className="pt-2">
                 <button
                   type="submit"
                   disabled={formLoading}
-                  className="w-full bg-primary-dark hover:bg-primary text-white font-outfit font-bold text-sm py-3.5 rounded-xl transition-all shadow-md active:scale-98 disabled:bg-gray-400"
+                  className="w-full bg-primary-dark hover:bg-primary text-white font-outfit font-bold text-sm py-3.5 rounded-xl transition-all shadow-md active:scale-98 disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >
                   {formLoading ? 'Saving Changes...' : 'Save Food Updates'}
                 </button>
@@ -1336,15 +1381,22 @@ const MenuManagement = () => {
               {formImagePreview ? (
                 <div className="relative aspect-[4/3] rounded-2xl overflow-hidden border border-border bg-cream">
                   <img src={formImagePreview} alt="Preview" className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end justify-between p-3">
-                    <span className="text-white text-xs font-bold">✓ Ready</span>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="bg-white/90 hover:bg-white text-primary-dark text-xs font-bold px-3 py-1 rounded-lg"
-                    >
-                      Choose Another
-                    </button>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/30 flex flex-col justify-between p-3.5">
+                    <span className="text-white text-xs font-bold truncate">
+                      {formImageFile ? formImageFile.name : 'Current Image'}
+                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/90 text-[10px] font-medium">
+                        {formImageFile ? `${(formImageFile.size / (1024 * 1024)).toFixed(2)} MB` : 'Stored in database'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="bg-white/90 hover:bg-white text-primary-dark text-xs font-bold px-3 py-1 rounded-lg shadow-sm"
+                      >
+                        Choose Another
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (
