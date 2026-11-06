@@ -16,6 +16,12 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
       return;
     }
 
+    // Measure exact rendered height of receipt content to calculate true continuous paper length
+    // Standard CSS: 96 DPI -> 1 inch = 25.4mm, so 1px = 25.4 / 96 mm ≈ 0.264583 mm
+    const contentHeightPx = receiptElement.scrollHeight || receiptElement.offsetHeight || 500;
+    const calculatedHeightMm = Math.ceil((contentHeightPx * 25.4) / 96) + 6; // 6mm tear-off buffer
+    const targetHeightMm = Math.max(calculatedHeightMm, 70); // Minimum 70mm
+
     const iframeId = '__drs_receipt_print_iframe__';
     let iframe = document.getElementById(iframeId);
     if (iframe && iframe.parentNode) {
@@ -28,7 +34,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
     iframe.style.left = '-10000px';
     iframe.style.top = '0';
     iframe.style.width = targetWidth;
-    iframe.style.height = '600px';
+    iframe.style.height = `${targetHeightMm}mm`;
     iframe.style.border = '0';
     iframe.style.opacity = '0.01';
     iframe.style.pointerEvents = 'none';
@@ -63,7 +69,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
           ${stylesHtml}
           <style>
             @page {
-              size: ${targetWidth} auto;
+              size: ${targetWidth} ${targetHeightMm}mm;
               margin: 0mm;
             }
             *, *::before, *::after {
@@ -72,25 +78,27 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
             html, body {
               width: ${targetWidth} !important;
               max-width: ${targetWidth} !important;
-              margin: 0 auto !important;
+              min-width: ${targetWidth} !important;
+              margin: 0 !important;
               padding: 0 !important;
               background: #ffffff !important;
               color: #000000 !important;
               font-family: 'DM Mono', 'Courier New', Courier, monospace, Arial, sans-serif !important;
-              font-size: ${is58mm ? '11px' : '12px'} !important;
-              line-height: 1.3 !important;
+              font-size: ${is58mm ? '10.5px' : '12px'} !important;
+              line-height: 1.25 !important;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
               height: auto !important;
               min-height: 0 !important;
-              max-height: none !important;
               overflow: visible !important;
             }
             .thermal-receipt-root {
               width: ${targetWidth} !important;
               max-width: ${targetWidth} !important;
-              margin: 0 auto !important;
-              padding: ${is58mm ? '2.5mm 1.5mm 4mm 1.5mm' : '3.5mm 2.5mm 5mm 2.5mm'} !important;
+              min-width: ${targetWidth} !important;
+              box-sizing: border-box !important;
+              margin: 0 !important;
+              padding: ${is58mm ? '2mm 2mm 4mm 2mm' : '3mm 3.5mm 5mm 3.5mm'} !important;
               background: #ffffff !important;
               color: #000000 !important;
               border: none !important;
@@ -107,7 +115,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
               page-break-inside: avoid !important;
               break-inside: avoid !important;
             }
-            /* Self-contained POS layout primitives */
+            /* Self-contained POS layout primitives to guarantee exact columns */
             .flex { display: flex !important; }
             .items-center { align-items: center !important; }
             .items-start { align-items: flex-start !important; }
@@ -122,7 +130,9 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
             .font-black { font-weight: 900 !important; }
             .font-medium { font-weight: 500 !important; }
             .uppercase { text-transform: uppercase !important; }
+            .w-7 { width: 1.75rem !important; }
             .w-9 { width: 2.25rem !important; }
+            .w-14 { width: 3.5rem !important; }
             .w-16 { width: 4rem !important; }
             .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .border-b { border-bottom: 1px solid #000 !important; }
@@ -232,17 +242,18 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
   return (
     <div className="fixed inset-0 z-[60] overflow-y-auto bg-stone-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:bg-white print:static">
       
-      {/* Injected Dynamic Thermal Print Stylesheet (Dual defense for direct print / Ctrl+P) */}
+      {/* Injected Dynamic Thermal Print Stylesheet (Dual defense for direct print / Ctrl+P fallback) */}
       <style>{`
         @media print {
           @page {
-            size: ${is58mm ? '58mm auto' : '80mm auto'};
+            size: ${is58mm ? '58mm 210mm' : '80mm 297mm'};
             margin: 0;
           }
 
           html, body {
             width: ${is58mm ? '58mm' : '80mm'} !important;
             max-width: ${is58mm ? '58mm' : '80mm'} !important;
+            min-width: ${is58mm ? '58mm' : '80mm'} !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
@@ -272,8 +283,10 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
             top: 0 !important;
             width: ${is58mm ? '58mm' : '80mm'} !important;
             max-width: ${is58mm ? '58mm' : '80mm'} !important;
+            min-width: ${is58mm ? '58mm' : '80mm'} !important;
+            box-sizing: border-box !important;
             margin: 0 !important;
-            padding: ${is58mm ? '2.5mm 1.5mm 4mm 1.5mm' : '3.5mm 2.5mm 5mm 2.5mm'} !important;
+            padding: ${is58mm ? '2mm 2mm 4mm 2mm' : '3mm 3.5mm 5mm 3.5mm'} !important;
             border: none !important;
             box-shadow: none !important;
             border-radius: 0 !important;
@@ -367,45 +380,50 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
           
           <div
             id="thermal-receipt"
-            className={`thermal-receipt-root bg-white text-black border border-stone-300 shadow-md print:shadow-none print:border-none print:m-0 print:p-0 ${
+            className={`thermal-receipt-root bg-white text-black border border-stone-300 shadow-md print:shadow-none print:border-none print:m-0 print:p-0 transition-all ${
               is58mm
-                ? 'w-[260px] max-w-[260px] p-3 text-[11px]'
-                : 'w-[340px] max-w-[340px] p-5 text-[12px]'
+                ? 'w-[58mm] max-w-[58mm] p-2.5 text-[10.5px]'
+                : 'w-[80mm] max-w-[80mm] p-4 text-[12px]'
             }`}
             style={{
+              width: is58mm ? '58mm' : '80mm',
+              maxWidth: is58mm ? '58mm' : '80mm',
+              boxSizing: 'border-box',
               fontFamily: "'DM Mono', 'Courier New', Courier, monospace, Arial, sans-serif",
-              lineHeight: 1.3,
+              lineHeight: 1.25,
             }}
           >
             {/* Header */}
-            <div className="thermal-avoid-break text-center pb-2">
-              <div className="text-xl mb-1 select-none">🍛</div>
-              <h2 className={`font-black uppercase tracking-wider ${is58mm ? 'text-[15px]' : 'text-[17px]'}`}>
+            <div className="thermal-avoid-break text-center pb-1.5">
+              <div className={`${is58mm ? 'text-lg' : 'text-xl'} mb-1 select-none`}>🍛</div>
+              <h2 className={`font-black uppercase tracking-wider ${is58mm ? 'text-[13.5px]' : 'text-[16px]'}`}>
                 DRS QUICK SERVE
               </h2>
-              <p className="font-bold uppercase tracking-tight text-[11px]">
+              <p className={`font-bold uppercase tracking-tight ${is58mm ? 'text-[10px]' : 'text-[11px]'}`}>
                 DRS COLLEGE CANTEEN
               </p>
-              <p className="text-[10px] text-stone-700 tracking-tight">
+              <p className={`text-stone-700 tracking-tight ${is58mm ? 'text-[9px]' : 'text-[10px]'}`}>
                 DRS College of Engg & Tech
               </p>
               
-              <div className="my-2 border-b border-dashed border-black" />
+              <div className="my-1.5 border-b border-dashed border-black" />
             </div>
 
             {/* Big Token Number Callout */}
             <div className="thermal-avoid-break text-center py-1 my-1 bg-stone-50 border border-black/20 rounded">
-              <span className="text-[10px] font-bold uppercase tracking-wider block">PICKUP TOKEN</span>
+              <span className={`${is58mm ? 'text-[9px]' : 'text-[10px]'} font-bold uppercase tracking-wider block`}>
+                PICKUP TOKEN
+              </span>
               <span className={`font-black tracking-widest ${is58mm ? 'text-2xl' : 'text-3xl'} leading-none`}>
                 #{pickupToken}
               </span>
-              <span className="text-[9px] font-medium text-stone-600 block mt-0.5">
+              <span className={`${is58mm ? 'text-[8px]' : 'text-[9px]'} font-medium text-stone-600 block mt-0.5`}>
                 {isWalkIn ? '★ DIRECT COUNTER SALE ★' : '★ ONLINE WEB ORDER ★'}
               </span>
             </div>
 
             {/* Metadata */}
-            <div className="thermal-avoid-break text-[11px] space-y-1 py-1.5">
+            <div className={`thermal-avoid-break ${is58mm ? 'text-[10px]' : 'text-[11px]'} space-y-1 py-1`}>
               <div className="flex justify-between">
                 <span className="font-semibold">ORDER ID:</span>
                 <span className="font-mono font-bold">#{order.orderCode}</span>
@@ -423,83 +441,83 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
 
               <div className="flex justify-between">
                 <span className="font-semibold">CUSTOMER:</span>
-                <span className="font-bold text-right truncate max-w-[170px]">
+                <span className={`font-bold text-right truncate ${is58mm ? 'max-w-[115px]' : 'max-w-[170px]'}`}>
                   {customerName}
                 </span>
               </div>
 
               {customerPhone && (
-                <div className="flex justify-between text-[10px]">
+                <div className={`flex justify-between ${is58mm ? 'text-[9px]' : 'text-[10px]'}`}>
                   <span className="font-semibold">PHONE:</span>
                   <span className="font-mono">{customerPhone}</span>
                 </div>
               )}
 
               {customerReg && (
-                <div className="flex justify-between text-[10px]">
+                <div className={`flex justify-between ${is58mm ? 'text-[9px]' : 'text-[10px]'}`}>
                   <span className="font-semibold">REG NO:</span>
                   <span className="font-bold font-mono">{customerReg}</span>
                 </div>
               )}
 
               {customerStaffId && (
-                <div className="flex justify-between text-[10px]">
+                <div className={`flex justify-between ${is58mm ? 'text-[9px]' : 'text-[10px]'}`}>
                   <span className="font-semibold">STAFF ID:</span>
                   <span className="font-bold font-mono">{customerStaffId}</span>
                 </div>
               )}
 
               {order.cashier?.name && (
-                <div className="flex justify-between text-[10px]">
+                <div className={`flex justify-between ${is58mm ? 'text-[9px]' : 'text-[10px]'}`}>
                   <span className="font-semibold">CASHIER:</span>
                   <span className="font-medium">{order.cashier.name}</span>
                 </div>
               )}
 
-              <div className="flex justify-between text-[10px] pt-0.5">
+              <div className={`flex justify-between ${is58mm ? 'text-[9px]' : 'text-[10px]'} pt-0.5`}>
                 <span className="font-semibold">PAY METHOD:</span>
                 <span className="font-bold">{paymentMethodUpper}</span>
               </div>
 
-              <div className="flex justify-between text-[10px]">
+              <div className={`flex justify-between ${is58mm ? 'text-[9px]' : 'text-[10px]'}`}>
                 <span className="font-semibold">PAY STATUS:</span>
                 <span className={`font-black ${isPaid ? 'underline' : ''}`}>
                   {isPaid ? 'PAID / COLLECTED' : 'PENDING'}
                 </span>
               </div>
 
-              <div className="my-2 border-b border-dashed border-black" />
+              <div className="my-1.5 border-b border-dashed border-black" />
             </div>
 
             {/* Items Table */}
             <div className="thermal-avoid-break pb-1">
-              <div className="flex justify-between items-center font-black pb-1 border-b border-black text-[11px] tracking-wider">
+              <div className={`flex justify-between items-center font-black pb-1 border-b border-black ${is58mm ? 'text-[10px]' : 'text-[11px]'} tracking-wider`}>
                 <span className="flex-1 text-left">ITEM</span>
-                <span className="w-9 text-center">QTY</span>
-                <span className="w-16 text-right">AMT</span>
+                <span className={`${is58mm ? 'w-7' : 'w-9'} text-center`}>QTY</span>
+                <span className={`${is58mm ? 'w-14' : 'w-16'} text-right`}>AMT</span>
               </div>
 
               <div className="divide-y divide-dashed divide-stone-300">
                 {order.items?.map((item, idx) => {
                   const lineTotal = (Number(item.price || 0) * Number(item.quantity || 1)).toFixed(2);
                   return (
-                    <div key={idx} className="thermal-avoid-break py-1 flex items-start text-[11px]">
+                    <div key={idx} className={`thermal-avoid-break py-1 flex items-start ${is58mm ? 'text-[10px]' : 'text-[11px]'}`}>
                       <div className="flex-1 pr-1">
                         <div className="font-bold leading-tight break-words">{item.name}</div>
-                        <div className="text-[10px] text-stone-600">@ ₹{Number(item.price || 0).toFixed(2)}</div>
+                        <div className={`${is58mm ? 'text-[9px]' : 'text-[10px]'} text-stone-600`}>@ ₹{Number(item.price || 0).toFixed(2)}</div>
                       </div>
-                      <div className="w-9 text-center font-bold pt-0.5">{item.quantity}</div>
-                      <div className="w-16 text-right font-black pt-0.5">₹{lineTotal}</div>
+                      <div className={`${is58mm ? 'w-7' : 'w-9'} text-center font-bold pt-0.5`}>{item.quantity}</div>
+                      <div className={`${is58mm ? 'w-14' : 'w-16'} text-right font-black pt-0.5`}>₹{lineTotal}</div>
                     </div>
                   );
                 })}
               </div>
 
-              <div className="my-2 border-b border-dashed border-black" />
+              <div className="my-1.5 border-b border-dashed border-black" />
             </div>
 
             {/* Totals */}
-            <div className="thermal-avoid-break space-y-1 text-[11px]">
+            <div className={`thermal-avoid-break space-y-1 ${is58mm ? 'text-[10px]' : 'text-[11px]'}`}>
               <div className="flex justify-between">
                 <span className="font-semibold">Subtotal</span>
                 <span className="font-bold">₹{subtotal.toFixed(2)}</span>
@@ -515,10 +533,10 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
               <div className="my-1 border-b-2 border-black" />
 
               <div className="flex justify-between items-baseline py-1">
-                <span className={`font-black uppercase tracking-wider ${is58mm ? 'text-[13px]' : 'text-[15px]'}`}>
+                <span className={`font-black uppercase tracking-wider ${is58mm ? 'text-[12.5px]' : 'text-[15px]'}`}>
                   GRAND TOTAL:
                 </span>
-                <span className={`font-black text-right ${is58mm ? 'text-[18px]' : 'text-[21px]'}`}>
+                <span className={`font-black text-right ${is58mm ? 'text-[16px]' : 'text-[21px]'}`}>
                   ₹{total.toFixed(2)}
                 </span>
               </div>
@@ -527,11 +545,17 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
             </div>
 
             {/* Footer */}
-            <div className="thermal-avoid-break text-center pt-2 text-[10px] space-y-1 leading-snug">
+            <div className={`thermal-avoid-break text-center pt-1.5 ${is58mm ? 'text-[9px]' : 'text-[10px]'} space-y-0.5 leading-snug`}>
               <p className="font-black uppercase tracking-wider">THANK YOU FOR YOUR VISIT!</p>
-              <p className="text-stone-700 text-[9px]">Please collect food when your token #{pickupToken} is called.</p>
-              <div className="pt-1.5 font-black tracking-tight text-[10px]">DRS QUICK SERVE</div>
-              <div className="pt-1 text-[8px] text-stone-500 font-mono">*** END OF RECEIPT ***</div>
+              <p className={`text-stone-700 ${is58mm ? 'text-[8px]' : 'text-[9px]'}`}>
+                Please collect food when your token #{pickupToken} is called.
+              </p>
+              <div className={`pt-1 font-black tracking-tight ${is58mm ? 'text-[9px]' : 'text-[10px]'}`}>
+                DRS QUICK SERVE
+              </div>
+              <div className={`pt-0.5 ${is58mm ? 'text-[7.5px]' : 'text-[8px]'} text-stone-500 font-mono`}>
+                *** END OF RECEIPT ***
+              </div>
             </div>
           </div>
         </div>
@@ -539,7 +563,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
         {/* Modal Bottom Bar (Hidden on Print) */}
         <div className="no-print bg-stone-50 border-t border-stone-200 p-3 sm:p-4 flex items-center justify-between gap-3">
           <div className="text-[11px] text-stone-500">
-            Thermal print ready for 80mm & 58mm POS receipt printers.
+            Selected: <span className="font-bold text-stone-800">{is58mm ? '58mm Compact Mobile' : '80mm POS Billing'}</span> roll size.
           </div>
           <div className="flex items-center gap-2">
             <button
