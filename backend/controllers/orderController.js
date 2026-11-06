@@ -30,15 +30,22 @@ const createOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No items in order' });
     }
 
-    // 1. Verify items are available in stock
+    // 1. Batch verify items from database in a single query
+    const itemIds = items
+      .map((item) => item?.menuItem)
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+
+    if (itemIds.length !== items.length) {
+      return res.status(400).json({ success: false, message: 'Invalid item ID found in order' });
+    }
+
+    const dbItems = await MenuItem.find({ _id: { $in: itemIds } }).lean();
+    const dbItemMap = new Map(dbItems.map((item) => [item._id.toString(), item]));
+
     let subtotal = 0;
     const verifiedItems = [];
 
     for (const item of items) {
-      if (!item || !item.menuItem) {
-        return res.status(400).json({ success: false, message: 'Invalid item data in order' });
-      }
-
       const qty = Number(item.quantity);
       if (!Number.isInteger(qty) || qty < 1 || qty > 20) {
         return res.status(400).json({
@@ -47,7 +54,7 @@ const createOrder = async (req, res) => {
         });
       }
 
-      const dbItem = await MenuItem.findById(item.menuItem);
+      const dbItem = dbItemMap.get(String(item.menuItem));
       if (!dbItem) {
         return res.status(404).json({ success: false, message: `Menu item not found: ${item.name || item.menuItem}` });
       }
@@ -110,46 +117,59 @@ const createOrder = async (req, res) => {
       status: 'Placed',
     });
 
-    // Populate user details for real-time order broadcast
-    const populatedOrder = await Order.findById(order._id).populate('user', 'name email');
-
-    // Real-time broadcast to Admin & Student
-    const io = req.app.get('socketio');
-    if (io) {
-      io.to('admin').emit('order:created', populatedOrder);
-
-      // 1. Student notification: Order Placed
-      await createAndEmitNotification(io, {
-        userId: req.user._id,
-        orderId: order._id,
-        orderCode: order.orderCode,
-        status: 'Placed',
-        metadata: {
-          orderCode: order.orderCode,
-          total: order.total,
-          itemsCount: order.items.length,
-        },
-      });
-
-      // 2. Admin notification: New Order Received
-      await createAndEmitAdminNotification(io, {
-        title: '🔔 New Order Placed',
-        message: `New order #${order.orderCode} received from ${req.user.name || 'Student'} (₹${order.total})`,
-        icon: '🔔',
-        priority: 'HIGH',
-        orderId: order._id,
-        metadata: {
-          orderCode: order.orderCode,
-          total: order.total,
-          customerName: req.user.name,
-        },
-      });
-    }
-
+    // Send HTTP response immediately (non-blocking)
     res.status(201).json({
       success: true,
       message: 'Order placed successfully',
       data: order
+    });
+
+    // Populate user in memory and emit real-time events & notifications asynchronously
+    setImmediate(async () => {
+      try {
+        const io = req.app.get('socketio');
+        if (!io) return;
+
+        const populatedOrder = {
+          ...order.toObject(),
+          user: {
+            _id: req.user._id,
+            name: req.user.name,
+            email: req.user.email,
+          },
+        };
+
+        io.to('admin').emit('order:created', populatedOrder);
+
+        // 1. Student notification: Order Placed
+        await createAndEmitNotification(io, {
+          userId: req.user._id,
+          orderId: order._id,
+          orderCode: order.orderCode,
+          status: 'Placed',
+          metadata: {
+            orderCode: order.orderCode,
+            total: order.total,
+            itemsCount: order.items.length,
+          },
+        });
+
+        // 2. Admin notification: New Order Received
+        await createAndEmitAdminNotification(io, {
+          title: '🔔 New Order Placed',
+          message: `New order #${order.orderCode} received from ${req.user.name || 'Student'} (₹${order.total})`,
+          icon: '🔔',
+          priority: 'HIGH',
+          orderId: order._id,
+          metadata: {
+            orderCode: order.orderCode,
+            total: order.total,
+            customerName: req.user.name,
+          },
+        });
+      } catch (err) {
+        console.error('Non-blocking order notification error:', err.message);
+      }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -161,7 +181,35 @@ const createOrder = async (req, res) => {
 // @access  Private
 const getMyOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
+    const { page, limit } = req.query;
+
+    if (page || limit) {
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
+      const skip = (pageNum - 1) * limitNum;
+
+      const [orders, total] = await Promise.all([
+        Order.find({ user: req.user._id })
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean(),
+        Order.countDocuments({ user: req.user._id }),
+      ]);
+
+      return res.json({
+        success: true,
+        data: orders,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum) || 1,
+          total,
+        },
+      });
+    }
+
+    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
     res.json({ success: true, data: orders });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

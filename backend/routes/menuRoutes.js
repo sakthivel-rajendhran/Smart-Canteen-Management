@@ -2,6 +2,7 @@ import express from 'express';
 import {
   getMenuItems,
   getMenuItemById,
+  checkMenuItems,
   createMenuItem,
   updateMenuItem,
   deleteMenuItem,
@@ -18,6 +19,9 @@ const router = express.Router();
 router.route('/')
   .get(getMenuItems)
   .post(protect, adminOnly, upload.single('image'), createMenuItem);
+
+// Lightweight batch availability/price check for checkout
+router.post('/check', checkMenuItems);
 
 router.route('/:id')
   .get(getMenuItemById)

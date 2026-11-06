@@ -1,18 +1,18 @@
 import React, { createContext, useState, useEffect, useRef, useCallback } from 'react';
-import io from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { useSocket } from './SocketContext';
 import notificationService from '../services/notificationService';
-import { getSocketUrl } from '../services/api';
 
 export const NotificationContext = createContext(null);
 
 export const NotificationProvider = ({ children }) => {
   const { user } = useAuth();
+  const { socket, isConnected } = useSocket();
 
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [socketStatus, setSocketStatus] = useState('disconnected'); // 'connected' | 'reconnecting' | 'disconnected'
+  const socketStatus = isConnected ? 'connected' : 'disconnected';
   const [toasts, setToasts] = useState([]);
 
   // Audio preference (default: ON)
@@ -251,69 +251,24 @@ export const NotificationProvider = ({ children }) => {
     }
   }, [notifications, fetchNotifications]);
 
-  // Manage Socket.IO lifecycle
+  // Manage Socket.IO notifications via shared socket
   useEffect(() => {
     if (!user || !user.token) {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
       setNotifications([]);
       setUnreadCount(0);
-      setSocketStatus('disconnected');
       return;
     }
 
     // Initial fetch of notification history
     fetchNotifications();
 
-    // Connect to Socket.IO server with JWT authentication
-    const socketUrl = getSocketUrl();
-    const socket = io(socketUrl, {
-      auth: {
-        token: user.token,
-      },
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 15,
-      reconnectionDelay: 1000,
-    });
+    if (!socket) return;
 
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      console.log('✅ Notification Socket connected:', socket.id);
-      setSocketStatus('connected');
-      // Refetch latest notifications on reconnect to synchronize state
-      notificationService
-        .getUnreadCount()
-        .then((res) => {
-          if (res?.success) setUnreadCount(res.unreadCount);
-        })
-        .catch(() => {});
-    });
-
-    socket.on('disconnect', () => {
-      console.warn('⚠️ Notification Socket disconnected');
-      setSocketStatus('disconnected');
-    });
-
-    socket.on('reconnect_attempt', () => {
-      setSocketStatus('reconnecting');
-    });
-
-    socket.on('reconnect', () => {
-      console.log('🔄 Notification Socket reconnected');
-      setSocketStatus('connected');
-      fetchNotifications();
-    });
-
-    // Real-Time Event: Incoming New Notification
-    socket.on('notification:new', (newNotif) => {
+    const handleNewNotification = (newNotif) => {
       console.log('🔔 Real-time notification received:', newNotif);
       if (!newNotif) return;
 
       setNotifications((prev) => {
-        // Prevent duplicate addition
         if (prev.some((n) => n._id === newNotif._id)) return prev;
         return [newNotif, ...prev];
       });
@@ -322,22 +277,21 @@ export const NotificationProvider = ({ children }) => {
       addToast(newNotif);
       playChime(newNotif.priority);
       triggerBrowserNotification(newNotif);
-    });
+    };
 
-    // Multi-tab sync listeners
-    socket.on('notification:read', ({ id }) => {
+    const handleReadNotification = ({ id }) => {
       setNotifications((prev) =>
         prev.map((n) => (n._id === id ? { ...n, read: true } : n))
       );
       setUnreadCount((prev) => Math.max(0, prev - 1));
-    });
+    };
 
-    socket.on('notification:readAll', () => {
+    const handleReadAllNotifications = () => {
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
       setUnreadCount(0);
-    });
+    };
 
-    socket.on('notification:deleted', ({ id }) => {
+    const handleDeletedNotification = ({ id }) => {
       setNotifications((prev) => prev.filter((n) => n._id !== id));
       notificationService
         .getUnreadCount()
@@ -345,13 +299,20 @@ export const NotificationProvider = ({ children }) => {
           if (res?.success) setUnreadCount(res.unreadCount);
         })
         .catch(() => {});
-    });
+    };
+
+    socket.on('notification:new', handleNewNotification);
+    socket.on('notification:read', handleReadNotification);
+    socket.on('notification:readAll', handleReadAllNotifications);
+    socket.on('notification:deleted', handleDeletedNotification);
 
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      socket.off('notification:new', handleNewNotification);
+      socket.off('notification:read', handleReadNotification);
+      socket.off('notification:readAll', handleReadAllNotifications);
+      socket.off('notification:deleted', handleDeletedNotification);
     };
-  }, [user?.token, fetchNotifications, addToast, playChime, triggerBrowserNotification]);
+  }, [user?.token, socket, fetchNotifications, addToast, playChime, triggerBrowserNotification]);
 
   return (
     <NotificationContext.Provider

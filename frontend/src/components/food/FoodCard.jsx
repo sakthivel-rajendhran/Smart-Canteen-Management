@@ -5,7 +5,17 @@ const FoodCard = ({ item, quantity = 0, onAdd, onChangeQty, onOpenDetail }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
 
-  const imageUrl = item?.image?.url || (typeof item?.image === 'string' ? item.image : '') || '';
+  const rawImageUrl = item?.image?.url || (typeof item?.image === 'string' ? item.image : '') || '';
+
+  // Cloudinary image delivery optimization (WebP/AVIF, auto quality, scaled to 400px)
+  const imageUrl = React.useMemo(() => {
+    if (!rawImageUrl || typeof rawImageUrl !== 'string') return '';
+    if (rawImageUrl.includes('res.cloudinary.com') && rawImageUrl.includes('/upload/') && !rawImageUrl.includes('/upload/f_')) {
+      return rawImageUrl.replace('/upload/', '/upload/f_auto,q_auto,w_400,c_limit/');
+    }
+    return rawImageUrl;
+  }, [rawImageUrl]);
+
   const isAvailable = item?.available !== false;
   const isFeatured = Boolean(item?.featured);
 
@@ -30,7 +40,10 @@ const FoodCard = ({ item, quantity = 0, onAdd, onChangeQty, onOpenDetail }) => {
           <img
             src={imageUrl}
             alt={item.name}
+            width="400"
+            height="300"
             loading="lazy"
+            decoding="async"
             onLoad={() => setImageLoaded(true)}
             onError={() => setImageError(true)}
             className={`w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-108 ${

@@ -1,33 +1,39 @@
 import Order from '../models/Order.js';
+import { cache } from '../utils/cache.js';
 
 // @desc    Get dashboard metrics overview (total orders, total revenue, counts by status)
 // @route   GET /api/analytics/overview
 // @access  Private/Admin
 const getAnalyticsOverview = async (req, res) => {
   try {
-    // 1. Get totals and revenues
-    const stats = await Order.aggregate([
-      {
-        $group: {
-          _id: null,
-          totalRevenue: { $sum: '$total' },
-          totalOrders: { $sum: 1 },
+    const cached = cache.get('analytics:overview');
+    if (cached) {
+      return res.json(cached);
+    }
+
+    // Run aggregations in parallel for high performance
+    const [stats, statusCounts] = await Promise.all([
+      Order.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$total' },
+            totalOrders: { $sum: 1 },
+          },
         },
-      },
+      ]),
+      Order.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const revenue = stats.length > 0 ? stats[0].totalRevenue : 0;
     const ordersCount = stats.length > 0 ? stats[0].totalOrders : 0;
-
-    // 2. Count by statuses
-    const statusCounts = await Order.aggregate([
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 },
-        },
-      },
-    ]);
 
     const statusMap = { Placed: 0, Confirmed: 0, Preparing: 0, Ready: 0, Completed: 0, Cancelled: 0 };
     statusCounts.forEach((item) => {
@@ -36,14 +42,17 @@ const getAnalyticsOverview = async (req, res) => {
       }
     });
 
-    res.json({
+    const responsePayload = {
       success: true,
       data: {
         totalRevenue: revenue,
         totalOrders: ordersCount,
         statusBreakdown: statusMap,
       },
-    });
+    };
+
+    cache.set('analytics:overview', responsePayload, 45);
+    res.json(responsePayload);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -54,6 +63,11 @@ const getAnalyticsOverview = async (req, res) => {
 // @access  Private/Admin
 const getRevenueTrends = async (req, res) => {
   try {
+    const cached = cache.get('analytics:revenue');
+    if (cached) {
+      return res.json(cached);
+    }
+
     // Group orders by creation day (past 7 days)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -75,7 +89,10 @@ const getRevenueTrends = async (req, res) => {
       { $sort: { _id: 1 } },
     ]);
 
-    res.json({ success: true, data: revenueByDay });
+    const responsePayload = { success: true, data: revenueByDay };
+    cache.set('analytics:revenue', responsePayload, 45);
+
+    res.json(responsePayload);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -86,6 +103,11 @@ const getRevenueTrends = async (req, res) => {
 // @access  Private/Admin
 const getPopularItems = async (req, res) => {
   try {
+    const cached = cache.get('analytics:popular');
+    if (cached) {
+      return res.json(cached);
+    }
+
     const popularItems = await Order.aggregate([
       { $match: { status: { $ne: 'Cancelled' } } },
       { $unwind: '$items' },
@@ -100,7 +122,10 @@ const getPopularItems = async (req, res) => {
       { $limit: 5 },
     ]);
 
-    res.json({ success: true, data: popularItems });
+    const responsePayload = { success: true, data: popularItems };
+    cache.set('analytics:popular', responsePayload, 45);
+
+    res.json(responsePayload);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -111,6 +136,11 @@ const getPopularItems = async (req, res) => {
 // @access  Private/Admin
 const getPaymentMethodStats = async (req, res) => {
   try {
+    const cached = cache.get('analytics:payments');
+    if (cached) {
+      return res.json(cached);
+    }
+
     const paymentMethods = await Order.aggregate([
       {
         $group: {
@@ -121,7 +151,10 @@ const getPaymentMethodStats = async (req, res) => {
       },
     ]);
 
-    res.json({ success: true, data: paymentMethods });
+    const responsePayload = { success: true, data: paymentMethods };
+    cache.set('analytics:payments', responsePayload, 45);
+
+    res.json(responsePayload);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

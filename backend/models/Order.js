@@ -85,8 +85,10 @@ const orderSchema = new mongoose.Schema(
   }
 );
 
-// Index to support sorting by creation date
+// Compound indexes for user orders and admin live status feeds
 orderSchema.index({ createdAt: -1 });
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ status: 1, createdAt: -1 });
 
 const Order = mongoose.model('Order', orderSchema);
 export default Order;

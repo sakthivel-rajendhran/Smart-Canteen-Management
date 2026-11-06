@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../services/api';
+import OrderSkeleton from '../components/skeletons/OrderSkeleton';
 import { 
   ClipboardList, 
   MapPin, 
@@ -87,10 +88,7 @@ const Orders = () => {
       </div>
 
       {loading ? (
-        <div className="py-20 flex flex-col items-center justify-center">
-          <div className="w-10 h-10 border-4 border-muted border-t-primary rounded-full animate-spin mb-4"></div>
-          <span className="text-muted text-sm">Loading order history...</span>
-        </div>
+        <OrderSkeleton count={3} />
       ) : error ? (
         <div className="text-center py-16 bg-white border border-border rounded-3xl">
           <BadgeAlert className="w-12 h-12 text-red-500 mx-auto mb-4" />

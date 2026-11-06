@@ -14,7 +14,7 @@ const getNotifications = async (req, res) => {
     }
 
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 50));
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 20));
     const skipNum = (pageNum - 1) * limitNum;
 
     const [notifications, total, unreadCount] = await Promise.all([
@@ -22,7 +22,8 @@ const getNotifications = async (req, res) => {
         .sort({ createdAt: -1 })
         .skip(skipNum)
         .limit(limitNum)
-        .populate('order', 'orderCode status total items'),
+        .populate('order', 'orderCode status total items')
+        .lean(),
       Notification.countDocuments(query),
       Notification.countDocuments({ user: req.user._id, read: false }),
     ]);

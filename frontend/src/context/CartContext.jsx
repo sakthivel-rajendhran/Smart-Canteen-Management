@@ -19,7 +19,7 @@ export const CartProvider = ({ children }) => {
         localStorage.removeItem('drs_cart');
       }
     }
-  }, []);
+  }, []); 
 
   // Save cart to localStorage on changes
   const saveCart = (newCart) => {
@@ -95,14 +95,16 @@ export const CartProvider = ({ children }) => {
     setCouponError('');
   };
 
-  // Revalidate stock availability before proceeding to payment
+  // Revalidate stock availability before proceeding to payment (lightweight check)
   const validateCartStock = async () => {
     try {
-      const response = await API.get('/menu');
+      if (cart.length === 0) return { valid: true };
+      const ids = cart.map((i) => i.menuItem);
+      const response = await API.post('/menu/check', { ids });
       if (response.data?.success) {
         const menuItems = response.data.data;
         for (const cartItem of cart) {
-          const matchingDbItem = menuItems.find((i) => i._id === cartItem.menuItem);
+          const matchingDbItem = menuItems.find((i) => String(i._id) === String(cartItem.menuItem));
           if (!matchingDbItem) {
             return { valid: false, message: `"${cartItem.name}" is no longer available. Please remove it.` };
           }

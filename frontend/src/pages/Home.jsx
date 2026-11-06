@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../services/api';
+import MenuCacheService from '../services/menuCache';
 import { 
   ArrowRight, 
   Smartphone, 
@@ -35,12 +36,19 @@ const Home = () => {
     }));
     setEmojis(temp);
 
-    // Fetch featured foods
+    // Fetch featured foods with client cache
     const fetchFeatured = async () => {
       try {
+        const cached = MenuCacheService.getFeatured();
+        if (cached && cached.length > 0) {
+          setFeaturedItems(cached.slice(0, 4));
+          if (MenuCacheService.isFeaturedFresh()) return;
+        }
+
         const res = await API.get('/menu?featuredOnly=true');
         if (res.data?.success) {
           setFeaturedItems(res.data.data.slice(0, 4));
+          MenuCacheService.setFeatured(res.data.data);
         }
       } catch (e) {
         // Silent catch for home preview

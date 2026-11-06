@@ -1,14 +1,29 @@
 import mongoose from 'mongoose';
 import Category from '../models/Category.js';
+import { cache } from '../utils/cache.js';
 
 // @desc    Get all active categories
 // @route   GET /api/categories
 // @access  Public
 const getCategories = async (req, res) => {
   try {
-    const filter = req.query.all === 'true' ? {} : { active: { $ne: false } };
-    const categories = await Category.find(filter).sort({ name: 1 });
-    res.json({ success: true, data: categories });
+    const isAll = req.query.all === 'true';
+    const cacheKey = `categories:${isAll ? 'all' : 'active'}`;
+    const cached = cache.get(cacheKey);
+
+    if (cached) {
+      res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      return res.json(cached);
+    }
+
+    const filter = isAll ? {} : { active: { $ne: false } };
+    const categories = await Category.find(filter).sort({ name: 1 }).lean();
+    const responsePayload = { success: true, data: categories };
+
+    cache.set(cacheKey, responsePayload, 60);
+
+    res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+    res.json(responsePayload);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -33,6 +48,10 @@ const createCategory = async (req, res) => {
     }
 
     const category = await Category.create({ name: cleanName });
+
+    cache.clearPrefix('categories');
+    cache.clearPrefix('menu');
+
     res.status(201).json({ success: true, message: 'Category created successfully', data: category });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -59,6 +78,10 @@ const updateCategory = async (req, res) => {
     category.active = active !== undefined ? active : category.active;
 
     await category.save();
+
+    cache.clearPrefix('categories');
+    cache.clearPrefix('menu');
+
     res.json({ success: true, message: 'Category updated successfully', data: category });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -81,6 +104,10 @@ const deleteCategory = async (req, res) => {
     }
 
     await category.deleteOne();
+
+    cache.clearPrefix('categories');
+    cache.clearPrefix('menu');
+
     res.json({ success: true, message: 'Category removed successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

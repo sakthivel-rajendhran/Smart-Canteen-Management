@@ -4,6 +4,7 @@ import dns from 'dns';
 import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import compression from 'compression';
 import dotenv from 'dotenv';
 
 // Database config
@@ -52,6 +53,7 @@ const corsOptions = {
   optionsSuccessStatus: 200,
 };
 
+app.use(compression());
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import io from 'socket.io-client';
-import API, { getSocketUrl } from '../services/api';
+import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
 import {
   Activity,
   ClipboardList,
@@ -62,47 +62,25 @@ const LiveTracking = () => {
   // Audio Context Ref
   const audioCtxRef = useRef(null);
 
+  const { socket, isConnected } = useSocket();
+
+  useEffect(() => {
+    setSocketStatus(isConnected ? 'connected' : 'disconnected');
+  }, [isConnected]);
+
   useEffect(() => {
     fetchActiveOrders();
+  }, []);
 
-    // Initialize Socket.IO connection with JWT authentication
-    const socketUrl = getSocketUrl();
-    const socket = io(socketUrl, {
-      auth: {
-        token: user?.token,
-      },
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
-
-    socket.on('connect', () => {
-      console.log('Live tracking socket connected:', socket.id);
-      setSocketStatus('connected');
-      socket.emit('join', 'admin');
-    });
-
-    socket.on('disconnect', () => {
-      console.warn('Live tracking socket disconnected.');
-      setSocketStatus('disconnected');
-    });
-
-    socket.on('reconnect_attempt', () => {
-      setSocketStatus('reconnecting');
-    });
-
-    socket.on('reconnect', () => {
-      setSocketStatus('connected');
-      socket.emit('join', 'admin');
-    });
+  useEffect(() => {
+    if (!socket) return;
 
     // Real-time: New Order Created
-    socket.on('order:created', (newOrder) => {
+    const handleCreated = (newOrder) => {
       console.log('Incoming live order event:', newOrder?.orderCode);
       if (!newOrder || !newOrder._id) return;
 
       setOrders((prev) => {
-        // Prevent duplicates
         if (prev.some((o) => o._id === newOrder._id || o.orderCode === newOrder.orderCode)) {
           return prev;
         }
@@ -111,10 +89,10 @@ const LiveTracking = () => {
 
       playChime();
       showToast(`🔔 New Order #${newOrder.orderCode} received! (₹${newOrder.total})`);
-    });
+    };
 
     // Real-time: Order Status Updated
-    socket.on('order:updated', (updatedOrder) => {
+    const handleUpdated = (updatedOrder) => {
       if (!updatedOrder) return;
       setOrders((prev) =>
         prev.map((o) => (o.orderCode === updatedOrder.orderCode ? updatedOrder : o))
@@ -122,9 +100,9 @@ const LiveTracking = () => {
       setSelectedOrder((prev) =>
         prev && prev.orderCode === updatedOrder.orderCode ? updatedOrder : prev
       );
-    });
+    };
 
-    socket.on('order:statusChanged', (payload) => {
+    const handleStatusChanged = (payload) => {
       if (!payload || !payload.orderCode) return;
       setOrders((prev) =>
         prev.map((o) => {
@@ -139,12 +117,18 @@ const LiveTracking = () => {
           return o;
         })
       );
-    });
+    };
+
+    socket.on('order:created', handleCreated);
+    socket.on('order:updated', handleUpdated);
+    socket.on('order:statusChanged', handleStatusChanged);
 
     return () => {
-      socket.disconnect();
+      socket.off('order:created', handleCreated);
+      socket.off('order:updated', handleUpdated);
+      socket.off('order:statusChanged', handleStatusChanged);
     };
-  }, []);
+  }, [socket]);
 
   const fetchActiveOrders = async () => {
     try {

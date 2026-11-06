@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import API, { getSocketUrl } from '../services/api';
-import io from 'socket.io-client';
+import { useSocket } from '../context/SocketContext';
+import API from '../services/api';
+import MenuCacheService from '../services/menuCache';
 import FoodCard from '../components/food/FoodCard';
 import FoodDetailModal from '../components/food/FoodDetailModal';
+import MenuSkeleton from '../components/skeletons/MenuSkeleton';
 import {
   Search,
   HelpCircle,
@@ -18,10 +20,11 @@ import {
 
 const Menu = () => {
   const { cart, addToCart, changeQuantity } = useCart();
+  const { socket } = useSocket();
 
-  const [categories, setCategories] = useState([]);
-  const [menuItems, setMenuItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState(() => MenuCacheService.getCategories() || []);
+  const [menuItems, setMenuItems] = useState(() => MenuCacheService.getMenu() || []);
+  const [loading, setLoading] = useState(() => !MenuCacheService.getMenu());
   const [error, setError] = useState('');
 
   // Active filter states
@@ -33,68 +36,80 @@ const Menu = () => {
   // Modal detail state
   const [selectedFood, setSelectedFood] = useState(null);
 
-  // Debounced search query
+  // Debounced search query (300ms)
   const [debouncedQuery, setDebouncedQuery] = useState('');
 
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedQuery(searchQuery);
-    }, 250);
+    }, 300);
     return () => clearTimeout(handler);
   }, [searchQuery]);
 
   useEffect(() => {
     fetchData();
-
-    // Setup Socket.IO for real-time menu synchronization
-    const socketUrl = getSocketUrl();
-    const socket = io(socketUrl, {
-      transports: ['websocket', 'polling'],
-    });
-
-    socket.on('connect', () => {
-      console.log('Real-time menu socket connected.');
-    });
-
-    // Real-time Event: New food added by Admin
-    socket.on('menu:created', (newItem) => {
-      setMenuItems((prev) => {
-        if (prev.some((item) => item._id === newItem._id)) return prev;
-        return [newItem, ...prev];
-      });
-    });
-
-    // Real-time Event: Food item updated (or image replaced)
-    socket.on('menu:updated', (updatedItem) => {
-      setMenuItems((prev) =>
-        prev.map((item) => (item._id === updatedItem._id ? updatedItem : item))
-      );
-      // Update selected food in modal if currently open
-      setSelectedFood((prev) => (prev && prev._id === updatedItem._id ? updatedItem : prev));
-    });
-
-    // Real-time Event: Food item removed
-    socket.on('menu:deleted', ({ id }) => {
-      setMenuItems((prev) => prev.filter((item) => item._id !== id));
-      setSelectedFood((prev) => (prev && prev._id === id ? null : prev));
-    });
-
-    // Real-time Event: Quick availability toggle
-    socket.on('menu:availabilityChanged', ({ id, available }) => {
-      setMenuItems((prev) =>
-        prev.map((item) => (item._id === id ? { ...item, available } : item))
-      );
-    });
-
-    return () => {
-      socket.disconnect();
-    };
   }, []);
 
+  // Real-time synchronization via shared socket
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCreated = (newItem) => {
+      setMenuItems((prev) => {
+        if (prev.some((item) => item._id === newItem._id)) return prev;
+        const updated = [newItem, ...prev];
+        MenuCacheService.setMenu(updated);
+        return updated;
+      });
+    };
+
+    const handleUpdated = (updatedItem) => {
+      setMenuItems((prev) => {
+        const updated = prev.map((item) => (item._id === updatedItem._id ? updatedItem : item));
+        MenuCacheService.setMenu(updated);
+        return updated;
+      });
+      setSelectedFood((prev) => (prev && prev._id === updatedItem._id ? updatedItem : prev));
+    };
+
+    const handleDeleted = ({ id }) => {
+      setMenuItems((prev) => {
+        const updated = prev.filter((item) => item._id !== id);
+        MenuCacheService.setMenu(updated);
+        return updated;
+      });
+      setSelectedFood((prev) => (prev && prev._id === id ? null : prev));
+    };
+
+    const handleAvailability = ({ id, available }) => {
+      setMenuItems((prev) => {
+        const updated = prev.map((item) => (item._id === id ? { ...item, available } : item));
+        MenuCacheService.setMenu(updated);
+        return updated;
+      });
+    };
+
+    socket.on('menu:created', handleCreated);
+    socket.on('menu:updated', handleUpdated);
+    socket.on('menu:deleted', handleDeleted);
+    socket.on('menu:availabilityChanged', handleAvailability);
+
+    return () => {
+      socket.off('menu:created', handleCreated);
+      socket.off('menu:updated', handleUpdated);
+      socket.off('menu:deleted', handleDeleted);
+      socket.off('menu:availabilityChanged', handleAvailability);
+    };
+  }, [socket]);
+
   const fetchData = async () => {
-    try {
+    const hasCachedData = Boolean(MenuCacheService.getMenu() && MenuCacheService.getCategories());
+    if (!hasCachedData) {
       setLoading(true);
-      setError('');
+    }
+    setError('');
+
+    try {
       const [catRes, menuRes] = await Promise.all([
         API.get('/categories'),
         API.get('/menu'),
@@ -103,9 +118,13 @@ const Menu = () => {
       if (catRes.data?.success && menuRes.data?.success) {
         setCategories(catRes.data.data);
         setMenuItems(menuRes.data.data);
+        MenuCacheService.setCategories(catRes.data.data);
+        MenuCacheService.setMenu(menuRes.data.data);
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Connection error. Please try again.');
+      if (!hasCachedData) {
+        setError(err.response?.data?.message || 'Connection error. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -278,12 +297,7 @@ const Menu = () => {
 
         {/* Dynamic State Rendering */}
         {loading ? (
-          <div className="py-24 text-center">
-            <div className="w-14 h-14 border-4 border-muted border-t-primary rounded-full animate-spin mx-auto mb-4" />
-            <span className="text-muted text-sm font-bold uppercase tracking-wider">
-              Preparing delicious menu...
-            </span>
-          </div>
+          <MenuSkeleton count={8} />
         ) : error ? (
           <div className="text-center py-20 bg-white border border-border rounded-3xl p-6 max-w-lg mx-auto shadow-sm">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />

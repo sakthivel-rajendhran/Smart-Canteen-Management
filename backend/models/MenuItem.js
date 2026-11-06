@@ -58,5 +58,8 @@ const menuItemSchema = new mongoose.Schema(
   }
 );
 
+// Compound index for optimized category and status filtering
+menuItemSchema.index({ category: 1, available: 1, featured: 1 });
+
 const MenuItem = mongoose.model('MenuItem', menuItemSchema);
 export default MenuItem;

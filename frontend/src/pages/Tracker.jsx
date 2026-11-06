@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import io from 'socket.io-client';
-import API, { getSocketUrl } from '../services/api';
+import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
 import { 
   ClipboardList, 
   MapPin, 
@@ -43,29 +43,17 @@ const Tracker = () => {
     Cancelled: { title: 'Order Cancelled ✕', msg: 'This order was cancelled.', bg: 'bg-red-50 border-red-200 text-red-700' }
   };
 
+  const { socket } = useSocket();
+
   useEffect(() => {
     fetchOrderDetails();
   }, [id]);
 
   useEffect(() => {
-    if (!order || !user) return;
-
-    // Connect to Socket.IO Server with JWT authentication
-    const socketUrl = getSocketUrl();
-    const socket = io(socketUrl, {
-      auth: { token: user.token },
-      withCredentials: true,
-      transports: ['websocket', 'polling']
-    });
-
-    socket.on('connect', () => {
-      console.log('Socket tracker connected successfully.');
-      // Join the private room for the logged-in student user
-      socket.emit('join', `user:${user._id}`);
-    });
+    if (!order || !socket) return;
 
     // Listen to real-time status changed events
-    socket.on('order:statusChanged', (payload) => {
+    const handleStatusChanged = (payload) => {
       if (payload.orderCode === order.orderCode) {
         console.log('Live status update received:', payload);
         setOrder((prev) => {
@@ -77,12 +65,14 @@ const Tracker = () => {
           };
         });
       }
-    });
+    };
+
+    socket.on('order:statusChanged', handleStatusChanged);
 
     return () => {
-      socket.disconnect();
+      socket.off('order:statusChanged', handleStatusChanged);
     };
-  }, [order, user]);
+  }, [order?.orderCode, socket]);
 
   const fetchOrderDetails = async () => {
     try {
