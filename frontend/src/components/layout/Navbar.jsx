@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
@@ -12,13 +12,15 @@ import {
   Menu, 
   X, 
   LayoutDashboard, 
-  FolderEdit, 
-  Percent, 
   BadgeIndianRupee,
   Receipt,
   Zap,
   CheckCircle2,
-  Ticket
+  Ticket,
+  SlidersHorizontal,
+  ChevronDown,
+  Layers,
+  TicketPercent
 } from 'lucide-react';
 import NotificationBell from '../notifications/NotificationBell';
 
@@ -27,7 +29,15 @@ const Navbar = () => {
   const { cart } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Mobile drawer states
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileMenuControlOpen, setMobileMenuControlOpen] = useState(false);
+
+  // Desktop dropdown state
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const menuControlRef = useRef(null);
+  const hoverTimeoutRef = useRef(null);
 
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
@@ -44,7 +54,58 @@ const Navbar = () => {
     return location.pathname === path;
   };
 
-  // Student bottom navigation items
+  // Whether current route belongs to Menu Control
+  const isMenuControlActive = ['/admin/menu', '/admin/categories', '/admin/coupons'].includes(location.pathname);
+
+  // Automatically close desktop dropdown on route change
+  useEffect(() => {
+    setDropdownOpen(false);
+  }, [location.pathname]);
+
+  // Open mobile Menu Control accordion if current active route belongs to it
+  useEffect(() => {
+    if (mobileMenuOpen && isMenuControlActive) {
+      setMobileMenuControlOpen(true);
+    }
+  }, [mobileMenuOpen, isMenuControlActive]);
+
+  // Click outside listener for desktop dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuControlRef.current && !menuControlRef.current.contains(event.target)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    };
+  }, []);
+
+  // Desktop hover handlers with smooth delay
+  const handleMouseEnter = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setDropdownOpen(true);
+  };
+
+  const handleMouseLeave = () => {
+    hoverTimeoutRef.current = setTimeout(() => {
+      setDropdownOpen(false);
+    }, 150);
+  };
+
+  const handleToggleDropdown = (e) => {
+    e.preventDefault();
+    setDropdownOpen((prev) => !prev);
+  };
+
+  // Customer bottom navigation items
   const studentNavItems = [
     { label: 'Home', path: '/', icon: <Home className="w-5 h-5" /> },
     { label: 'Menu', path: '/menu', icon: <Utensils className="w-5 h-5" /> },
@@ -63,24 +124,32 @@ const Navbar = () => {
     { label: 'Profile', path: '/profile', icon: <User className="w-5 h-5" /> }
   ];
 
-  // Admin navigation items
-  const adminNavItems = [
+  // Admin Navigation Items (before Menu Control)
+  const adminPrimaryNavItems = [
     { label: 'Overview', path: '/admin', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
     { label: 'POS Billing', path: '/admin/pos', icon: <Zap className="w-3.5 h-3.5" /> },
     { label: 'Live Queue', path: '/admin/live-tracking', icon: <ClipboardList className="w-3.5 h-3.5" /> },
     { label: 'Handover', path: '/admin/handover', icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
     { label: 'Bill Archive', path: '/admin/bills', icon: <Receipt className="w-3.5 h-3.5" /> },
-    { label: 'Menu', path: '/admin/menu', icon: <Utensils className="w-3.5 h-3.5" /> },
-    { label: 'Categories', path: '/admin/categories', icon: <FolderEdit className="w-3.5 h-3.5" /> },
-    { label: 'Coupons', path: '/admin/coupons', icon: <Percent className="w-3.5 h-3.5" /> },
-    { label: 'Payments', path: '/admin/payments', icon: <BadgeIndianRupee className="w-3.5 h-3.5" /> }
+  ];
+
+  // Menu Control Dropdown Submenu Items
+  const menuControlSubItems = [
+    { label: 'Menu Management', path: '/admin/menu', icon: <Utensils className="w-4 h-4" /> },
+    { label: 'Category Management', path: '/admin/categories', icon: <Layers className="w-4 h-4" /> },
+    { label: 'Coupon Management', path: '/admin/coupons', icon: <TicketPercent className="w-4 h-4" /> },
+  ];
+
+  // Admin Navigation Items (after Menu Control)
+  const adminSecondaryNavItems = [
+    { label: 'Payments', path: '/admin/payments', icon: <BadgeIndianRupee className="w-3.5 h-3.5" /> },
   ];
 
   const renderNavLinks = () => {
     if (user?.role === 'admin') {
       return (
         <>
-          {adminNavItems.map((item) => (
+          {adminPrimaryNavItems.map((item) => (
             <Link
               key={item.path}
               to={item.path}
@@ -94,6 +163,85 @@ const Navbar = () => {
               <span>{item.label}</span>
             </Link>
           ))}
+
+          {/* ================= MENU CONTROL DROPDOWN (DESKTOP) ================= */}
+          <div
+            ref={menuControlRef}
+            className="relative"
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+          >
+            <button
+              type="button"
+              onClick={handleToggleDropdown}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all select-none cursor-pointer ${
+                isMenuControlActive
+                  ? 'bg-amber text-primary-darker shadow-md font-bold'
+                  : 'text-white/80 hover:bg-white/10 hover:text-white'
+              }`}
+              aria-expanded={dropdownOpen}
+              aria-haspopup="true"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Menu Control</span>
+              <ChevronDown
+                className={`w-3 h-3 transition-transform duration-200 ${
+                  dropdownOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {/* Dropdown Menu Container */}
+            <div
+              className={`absolute top-full left-0 pt-2 z-50 transition-all duration-200 transform origin-top-left ${
+                dropdownOpen
+                  ? 'opacity-100 scale-100 pointer-events-auto'
+                  : 'opacity-0 scale-95 pointer-events-none'
+              }`}
+            >
+              <div className="bg-[#072419] border border-amber/30 rounded-2xl shadow-xl shadow-black/60 p-1.5 min-w-[210px] backdrop-blur-md">
+                <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-amber/80 border-b border-white/10 mb-1">
+                  Catalog Control
+                </div>
+                {menuControlSubItems.map((subItem) => {
+                  const isSubActive = location.pathname === subItem.path;
+                  return (
+                    <Link
+                      key={subItem.path}
+                      to={subItem.path}
+                      onClick={() => setDropdownOpen(false)}
+                      className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all ${
+                        isSubActive
+                          ? 'bg-amber text-primary-darker font-black shadow-xs'
+                          : 'text-white/85 hover:bg-white/10 hover:text-white font-medium'
+                      }`}
+                    >
+                      <span className={isSubActive ? 'text-primary-darker' : 'text-amber'}>
+                        {subItem.icon}
+                      </span>
+                      <span>{subItem.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {adminSecondaryNavItems.map((item) => (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                isActive(item.path)
+                  ? 'bg-amber text-primary-darker shadow-md'
+                  : 'text-white/80 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </Link>
+          ))}
+
           <div className="ml-1">
             <NotificationBell isAdmin={true} />
           </div>
@@ -140,7 +288,7 @@ const Navbar = () => {
                   : 'text-white/85 hover:bg-white/10 hover:text-white'
               }`}
             >
-              <QrCode className="w-4 h-4 text-amber" />
+              <Ticket className="w-4 h-4 text-amber" />
               <span>Pickup</span>
             </Link>
             <Link
@@ -185,7 +333,7 @@ const Navbar = () => {
 
   return (
     <>
-      {/* Desktop/Tablet Header Header */}
+      {/* Desktop/Tablet Header */}
       <nav className="bg-primary-darker border-b border-white/10 sticky top-0 z-50 px-[5%] h-16 flex items-center justify-between shadow-lg">
         <Link to="/" className="flex items-center gap-2 text-decoration-none">
           <div className="w-9 h-9 bg-amber rounded-lg flex items-center justify-center font-bold text-lg shadow-md shadow-amber/30">
@@ -238,13 +386,13 @@ const Navbar = () => {
 
       {/* Admin Mobile Menu Drawer */}
       {mobileMenuOpen && (user?.role === 'admin' || user?.role === 'ADMIN') && (
-        <div className="md:hidden fixed inset-0 z-40 bg-primary-darker/95 backdrop-blur-md pt-20 px-6 flex flex-col gap-4">
-          {adminNavItems.map((item) => (
+        <div className="md:hidden fixed inset-0 z-40 bg-primary-darker/95 backdrop-blur-md pt-20 px-6 flex flex-col gap-2.5 overflow-y-auto pb-10">
+          {adminPrimaryNavItems.map((item) => (
             <Link
               key={item.path}
               to={item.path}
               onClick={() => setMobileMenuOpen(false)}
-              className={`flex items-center gap-4 p-4 rounded-xl text-sm font-bold transition-all ${
+              className={`flex items-center gap-3.5 p-3.5 rounded-xl text-sm font-bold transition-all ${
                 isActive(item.path)
                   ? 'bg-amber text-primary-darker'
                   : 'text-white hover:bg-white/10'
@@ -254,9 +402,76 @@ const Navbar = () => {
               <span>{item.label}</span>
             </Link>
           ))}
+
+          {/* Menu Control Mobile Accordion */}
+          <div className="rounded-xl overflow-hidden border border-white/15 bg-white/5">
+            <button
+              type="button"
+              onClick={() => setMobileMenuControlOpen((prev) => !prev)}
+              className={`w-full flex items-center justify-between p-3.5 rounded-xl text-sm font-bold transition-all ${
+                isMenuControlActive
+                  ? 'bg-amber text-primary-darker'
+                  : 'text-white hover:bg-white/10'
+              }`}
+            >
+              <div className="flex items-center gap-3.5">
+                <SlidersHorizontal className="w-5 h-5" />
+                <span>Menu Control</span>
+              </div>
+              <ChevronDown
+                className={`w-4 h-4 transition-transform duration-200 ${
+                  mobileMenuControlOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {mobileMenuControlOpen && (
+              <div className="pl-6 pr-3 py-2 flex flex-col gap-1.5 bg-black/25 border-t border-white/10">
+                {menuControlSubItems.map((subItem) => {
+                  const isSubActive = location.pathname === subItem.path;
+                  return (
+                    <Link
+                      key={subItem.path}
+                      to={subItem.path}
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                      }}
+                      className={`flex items-center gap-3 p-2.5 rounded-lg text-xs font-semibold transition-all ${
+                        isSubActive
+                          ? 'bg-amber text-primary-darker font-black'
+                          : 'text-white/80 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      <span className={isSubActive ? 'text-primary-darker' : 'text-amber'}>
+                        {subItem.icon}
+                      </span>
+                      <span>{subItem.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {adminSecondaryNavItems.map((item) => (
+            <Link
+              key={item.path}
+              to={item.path}
+              onClick={() => setMobileMenuOpen(false)}
+              className={`flex items-center gap-3.5 p-3.5 rounded-xl text-sm font-bold transition-all ${
+                isActive(item.path)
+                  ? 'bg-amber text-primary-darker'
+                  : 'text-white hover:bg-white/10'
+              }`}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </Link>
+          ))}
+
           <button
             onClick={handleLogout}
-            className="flex items-center gap-4 p-4 rounded-xl text-sm font-bold text-red-400 hover:bg-red-950/20 mt-auto mb-10"
+            className="flex items-center gap-3.5 p-3.5 rounded-xl text-sm font-bold text-red-400 hover:bg-red-950/20 mt-4"
           >
             <LogOut className="w-5 h-5" />
             <span>Logout Dashboard</span>
