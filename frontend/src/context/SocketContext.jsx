@@ -15,13 +15,14 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     const socketUrl = getSocketUrl();
+    console.log('🔌 Connecting shared Socket.IO to:', socketUrl);
 
     // Create a single socket connection instance for the tab
     const socket = io(socketUrl, {
       auth: {
         token: user?.token || '',
       },
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnectionAttempts: 15,
       reconnectionDelay: 1000,
       withCredentials: true,
@@ -40,6 +41,11 @@ export const SocketProvider = ({ children }) => {
       if (user?.role === 'admin') {
         socket.emit('join', 'admin');
       }
+    });
+
+    socket.on('connect_error', (err) => {
+      console.warn('⚠️ Shared Socket.IO connection attempt warning:', err.message);
+      setIsConnected(false);
     });
 
     socket.on('disconnect', () => {
@@ -78,3 +84,4 @@ export const useSocket = () => {
 };
 
 export default SocketContext;
+

@@ -1,8 +1,21 @@
 import axios from 'axios';
 
-// VITE_API_URL falls back to '/api' so it operates through the Vite proxy in development
+// Default API baseURL: on Vercel or any production host, connect directly to Render backend
+const getDefaultApiUrl = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  if (typeof window !== 'undefined') {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (!isLocal) {
+      return 'https://smart-canteen-management-1-b9zg.onrender.com/api';
+    }
+  }
+  return '/api';
+};
+
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: getDefaultApiUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
@@ -27,7 +40,15 @@ export const getSocketUrl = () => {
   if (apiUrl && apiUrl.startsWith('http')) {
     return apiUrl.replace(/\/api\/?$/, '');
   }
-  return `${window.location.protocol}//${window.location.hostname}:5000`;
+  if (typeof window !== 'undefined') {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (!isLocal) {
+      // Production fallback directly to the Render backend service
+      return 'https://smart-canteen-management-1-b9zg.onrender.com';
+    }
+    return `${window.location.protocol}//${window.location.hostname}:5000`;
+  }
+  return 'http://localhost:5000';
 };
 
 export default API;

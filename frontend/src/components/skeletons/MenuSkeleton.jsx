@@ -29,3 +29,4 @@ export const MenuSkeleton = ({ count = 6 }) => {
 };
 
 export default MenuSkeleton;
+
