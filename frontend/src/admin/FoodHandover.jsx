@@ -811,7 +811,7 @@ const FoodHandover = () => {
                             className="flex-1 flex items-center justify-center gap-2 bg-[#0b3d2e] hover:bg-[#1a7a45] active:scale-95 text-white font-black text-xs py-2.5 px-3 rounded-xl shadow transition"
                           >
                             <Sparkles className="w-3.5 h-3.5 text-amber" />
-                            <span>Handover Food & Print Bill</span>
+                            <span>Handover Food</span>
                           </button>
                         </div>
                       )}
