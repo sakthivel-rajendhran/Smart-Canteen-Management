@@ -35,9 +35,21 @@ const createOrder = async (req, res) => {
     const verifiedItems = [];
 
     for (const item of items) {
+      if (!item || !item.menuItem) {
+        return res.status(400).json({ success: false, message: 'Invalid item data in order' });
+      }
+
+      const qty = Number(item.quantity);
+      if (!Number.isInteger(qty) || qty < 1 || qty > 20) {
+        return res.status(400).json({
+          success: false,
+          message: 'Quantity must be a whole number between 1 and 20'
+        });
+      }
+
       const dbItem = await MenuItem.findById(item.menuItem);
       if (!dbItem) {
-        return res.status(404).json({ success: false, message: `Menu item not found: ${item.name}` });
+        return res.status(404).json({ success: false, message: `Menu item not found: ${item.name || item.menuItem}` });
       }
 
       if (!dbItem.available) {
@@ -47,14 +59,14 @@ const createOrder = async (req, res) => {
         });
       }
 
-      const itemTotal = dbItem.price * item.quantity;
+      const itemTotal = dbItem.price * qty;
       subtotal += itemTotal;
 
       verifiedItems.push({
         menuItem: dbItem._id,
         name: dbItem.name,
         price: dbItem.price,
-        quantity: item.quantity,
+        quantity: qty,
         emoji: dbItem.emoji,
         image: (dbItem.image && typeof dbItem.image === 'object' ? dbItem.image.url : dbItem.image) || '',
       });
@@ -105,7 +117,6 @@ const createOrder = async (req, res) => {
     const io = req.app.get('socketio');
     if (io) {
       io.to('admin').emit('order:created', populatedOrder);
-      io.emit('order:created', populatedOrder);
 
       // 1. Student notification: Order Placed
       await createAndEmitNotification(io, {
@@ -250,16 +261,8 @@ const updateOrderStatus = async (req, res) => {
         order,
       });
 
-      // 3. Notify admin page and general socket listeners
+      // 3. Notify admin page
       io.to('admin').emit('order:updated', order);
-      io.emit('order:updated', order);
-      io.emit('order:statusChanged', {
-        orderId: order._id,
-        orderCode: order.orderCode,
-        status: order.status,
-        paymentStatus: order.paymentStatus,
-        order,
-      });
     }
 
     res.json({ success: true, message: `Order status updated to ${status}`, data: order });

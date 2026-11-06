@@ -27,6 +27,11 @@ import { notFound, errorHandler } from './middleware/errorMiddleware.js';
 
 dotenv.config();
 
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is required.');
+  process.exit(1);
+}
+
 // Connect to Database
 connectDB();
 

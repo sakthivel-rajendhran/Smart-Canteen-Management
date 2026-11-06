@@ -12,10 +12,7 @@ const configureSockets = (io) => {
 
       if (token) {
         try {
-          const decoded = jwt.verify(
-            token,
-            process.env.JWT_SECRET || 'supersecretjwtkeydrsquickserve12345'
-          );
+          const decoded = jwt.verify(token, process.env.JWT_SECRET);
           const user = await User.findById(decoded.id).select('-password');
           if (user) {
             socket.user = user;

@@ -75,39 +75,59 @@ const menuItemsData = [
 
 const seedDB = async () => {
   try {
+    if (process.env.NODE_ENV === 'production' && !process.argv.includes('--force')) {
+      console.error('❌ Refusing to seed database in production without --force flag.');
+      process.exit(1);
+    }
+
     const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/drs_quick_serve';
     console.log(`Connecting to MongoDB at: ${mongoUri}`);
     await mongoose.connect(mongoUri);
     console.log('MongoDB connection active.');
 
-    // Clear existing collections
-    console.log('Clearing old data...');
-    await User.deleteMany({});
+    // Clear existing menu and coupon collections (preserve user accounts and order integrity)
+    console.log('Clearing old categories, menu items, and coupons...');
     await Category.deleteMany({});
     await MenuItem.deleteMany({});
     await Coupon.deleteMany({});
-    console.log('Collections cleared.');
+    console.log('Menu, categories, and coupons cleared.');
 
-    // Seed default users
-    console.log('Seeding default users...');
-    const adminUser = new User({
-      name: 'DRSCE',
-      email: 'sakthiadmin@gmail.com',
-      password: 'Sakthi@2004',
-      role: 'admin',
-      phone: '9876543210'
-    });
-    await adminUser.save();
+    // Seed/Upsert default users from environment variables
+    console.log('Ensuring seed users exist...');
+    const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@drsquickserve.com';
+    const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'Admin@12345';
+    const normalEmail = process.env.SEED_USER_EMAIL || 'student@drsquickserve.com';
+    const normalPassword = process.env.SEED_USER_PASSWORD || 'Student@12345';
 
-    const normalUser = new User({
-      name: 'SAKTHIVEL.R',
-      email: 'sakthivel.june03@gmail.com',
-      password: '123456',
-      role: 'user',
-      phone: '9876543211'
-    });
-    await normalUser.save();
-    console.log('Default users seeded successfully.');
+    let adminUser = await User.findOne({ email: adminEmail });
+    if (!adminUser) {
+      adminUser = new User({
+        name: 'DRSCE Admin',
+        email: adminEmail,
+        password: adminPassword,
+        role: 'admin',
+        phone: '9876543210'
+      });
+      await adminUser.save();
+      console.log(`Created seed admin user: ${adminEmail}`);
+    } else {
+      console.log(`Seed admin user already exists: ${adminEmail}`);
+    }
+
+    let normalUser = await User.findOne({ email: normalEmail });
+    if (!normalUser) {
+      normalUser = new User({
+        name: 'Student User',
+        email: normalEmail,
+        password: normalPassword,
+        role: 'user',
+        phone: '9876543211'
+      });
+      await normalUser.save();
+      console.log(`Created seed student user: ${normalEmail}`);
+    } else {
+      console.log(`Seed student user already exists: ${normalEmail}`);
+    }
 
     // Seed Categories
     console.log('Seeding categories...');

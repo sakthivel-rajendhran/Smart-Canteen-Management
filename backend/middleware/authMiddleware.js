@@ -9,10 +9,10 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ success: false, message: 'Not authorized, no token provided' });
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeydrsquickserve12345');
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
       req.user = await User.findById(decoded.id).select('-password');
-      if (!req.user) {
-        return res.status(401).json({ success: false, message: 'Not authorized, user not found' });
+      if (!req.user || req.user.isActive === false) {
+        return res.status(401).json({ success: false, message: 'Not authorized, user not found or deactivated' });
       }
 
       return next();

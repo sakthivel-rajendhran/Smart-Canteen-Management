@@ -92,21 +92,40 @@ const verifyPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
+    // Verify order ownership
+    if (order.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized to verify payment for this order' });
+    }
+
+    // Return early if already paid
+    if (order.paymentStatus === 'paid') {
+      return res.json({ success: true, message: 'Order is already paid', data: order });
+    }
+
     // Standard Signature Verification
     const secret = process.env.RAZORPAY_KEY_SECRET || 'your_razorpay_secret_here';
-    
-    // Fallback: If secret is default, we allow test checkout to succeed
     const isSecretPlaceholder = secret.includes('your_');
+    const isProd = process.env.NODE_ENV === 'production';
     let isValid = false;
 
-    if (isSecretPlaceholder || razorpay_order_id.startsWith('order_mock_')) {
-      console.warn('Razorpay secret is placeholder or mock order. Bypassing signature verification for testing.');
+    // Allow mock bypass ONLY in non-production environments
+    if (!isProd && (isSecretPlaceholder || razorpay_order_id.startsWith('order_mock_'))) {
+      console.warn('Razorpay secret is placeholder or mock order. Bypassing signature verification in non-production.');
       isValid = true;
     } else {
-      const shasum = crypto.createHmac('sha256', secret);
-      shasum.update(`${razorpay_order_id}|${razorpay_payment_id}`);
-      const digest = shasum.digest('hex');
-      isValid = digest === razorpay_signature;
+      const expectedDigest = crypto
+        .createHmac('sha256', secret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest('hex');
+
+      const expectedBuffer = Buffer.from(expectedDigest, 'utf8');
+      const signatureBuffer = Buffer.from(razorpay_signature || '', 'utf8');
+
+      if (expectedBuffer.length === signatureBuffer.length) {
+        isValid = crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
+      } else {
+        isValid = false;
+      }
     }
 
     if (isValid) {
@@ -115,15 +134,21 @@ const verifyPayment = async (req, res) => {
       order.paymentId = razorpay_payment_id;
       await order.save();
 
-      // Log Payment transaction
-      await Payment.create({
-        order: order._id,
-        razorpayOrderId: razorpay_order_id,
-        razorpayPaymentId: razorpay_payment_id,
-        razorpaySignature: razorpay_signature || 'BYPASSED_DEV',
-        amount: order.total,
-        status: 'captured',
+      // Log Payment transaction idempotently
+      const existingPayment = await Payment.findOne({
+        $or: [{ razorpayPaymentId: razorpay_payment_id }, { razorpayOrderId: razorpay_order_id }]
       });
+
+      if (!existingPayment) {
+        await Payment.create({
+          order: order._id,
+          razorpayOrderId: razorpay_order_id,
+          razorpayPaymentId: razorpay_payment_id,
+          razorpaySignature: razorpay_signature || (isProd ? '' : 'BYPASSED_DEV'),
+          amount: order.total,
+          status: 'captured',
+        });
+      }
 
       // Broadcast update to user status tracker
       const io = req.app.get('socketio');
