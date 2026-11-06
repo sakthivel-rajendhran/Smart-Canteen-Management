@@ -175,12 +175,12 @@ const FoodHandover = () => {
         });
         setQuickVerifyInput('');
 
-        // Automatically open thermal receipt print for the verified order
+        // Automatically open thermal receipt modal for the verified order (preview only, no auto browser print dialog)
         if (orderData) {
           setReceiptModal({
             isOpen: true,
             order: orderData,
-            autoPrint: true,
+            autoPrint: false,
           });
         }
 
@@ -201,18 +201,8 @@ const FoodHandover = () => {
     }
   };
 
-  // Click Handover button on a card:
-  // Step 1: Open Thermal Bill Print
-  // Step 2: Show Physical Handover Confirmation Dialog
+  // Click Handover Food button on a card: Open Physical Handover Confirmation Dialog
   const handleStartHandover = (order) => {
-    // 1. Trigger receipt print
-    setReceiptModal({
-      isOpen: true,
-      order,
-      autoPrint: true,
-    });
-
-    // 2. Open confirmation prompt
     setConfirmModal({
       isOpen: true,
       order,
@@ -921,7 +911,7 @@ const FoodHandover = () => {
                     setReceiptModal({
                       isOpen: true,
                       order: confirmModal.order,
-                      autoPrint: true,
+                      autoPrint: false,
                     });
                   }}
                   className="flex-1 flex items-center justify-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs py-2.5 px-3 rounded-xl border border-stone-300 transition"

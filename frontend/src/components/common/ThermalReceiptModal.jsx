@@ -57,7 +57,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:bg-white print:static">
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-stone-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 print:p-0 print:bg-white print:static">
       
       {/* Injected Dynamic Thermal Print Stylesheet */}
       <style>{`
