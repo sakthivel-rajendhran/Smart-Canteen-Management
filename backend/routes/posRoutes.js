@@ -3,8 +3,11 @@ import {
   createWalkInOrder,
   getReadyOrders,
   getHandoverOrders,
+  printBill,
+  recordPayment,
   verifyAndHandoverOrder,
   getBillArchive,
+  getFounderReport,
   getBillById,
   getRetentionSettings,
   updateRetentionSettings,
@@ -21,13 +24,16 @@ router.use(protect, adminOnly);
 // POS Counter Sales (Walk-in)
 router.post('/pos/orders', createWalkInOrder);
 
-// Ready for Pickup Queue & Handover Management
+// Food Handover, Bill Printing & Pickup Verification Counter
 router.get('/pos/ready-orders', getReadyOrders);
 router.get('/pos/handover-orders', getHandoverOrders);
+router.post('/pos/print-bill', printBill);
+router.post('/pos/record-payment', recordPayment);
 router.post('/pos/verify-pickup', verifyAndHandoverOrder);
 router.post('/orders/:id/verify-pickup', verifyAndHandoverOrder);
 
-// Bill Archive & Sales History
+// Bill Archive & Daily Sales History
+router.get('/bills/founder-report', getFounderReport);
 router.get('/bills', getBillArchive);
 router.get('/bills/:id', getBillById);
 
@@ -39,4 +45,3 @@ router.route('/settings/bill-retention')
 router.post('/settings/bill-retention/cleanup', cleanupExpiredBills);
 
 export default router;
-

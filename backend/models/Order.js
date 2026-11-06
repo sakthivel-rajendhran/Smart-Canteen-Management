@@ -135,6 +135,34 @@ const orderSchema = new mongoose.Schema(
     pickupBillNotifiedAt: {
       type: Date,
     },
+    // Bill Generation & Physical Thermal Printing Tracking
+    billNumber: {
+      type: String,
+      default: '',
+      index: true,
+    },
+    billStatus: {
+      type: String,
+      enum: ['NOT_GENERATED', 'GENERATED', 'PRINTED'],
+      default: 'NOT_GENERATED',
+      index: true,
+    },
+    billGeneratedAt: {
+      type: Date,
+    },
+    billPrintedAt: {
+      type: Date,
+    },
+    billPrintCount: {
+      type: Number,
+      default: 0,
+    },
+    handoverStatus: {
+      type: String,
+      enum: ['PENDING', 'COMPLETED'],
+      default: 'PENDING',
+      index: true,
+    },
     // Cashier who entered the walk-in order
     cashier: {
       type: mongoose.Schema.Types.ObjectId,
@@ -153,6 +181,9 @@ orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ orderType: 1, createdAt: -1 });
 orderSchema.index({ status: 1, completedAt: -1 });
 orderSchema.index({ completedAt: -1 });
+orderSchema.index({ billStatus: 1, handoverStatus: 1, createdAt: -1 });
+orderSchema.index({ handoverStatus: 1, createdAt: -1 });
+orderSchema.index({ billNumber: 1 });
 
 const Order = mongoose.model('Order', orderSchema);
 export default Order;

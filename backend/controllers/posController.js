@@ -10,14 +10,18 @@ import {
   createAndEmitAdminNotification,
 } from '../utils/notificationHelper.js';
 
-// Safe query helper by code, token, or Mongo ID
+// Safe query helper by bill number, order code, token, secret, or Mongo ID
 const buildSafeOrderQuery = (rawQuery) => {
   if (!rawQuery) return null;
   const term = String(rawQuery).trim();
-  const withoutPrefix = term.replace(/^DRS-/i, '');
+  const withoutPrefix = term.replace(/^DRS-/i, '').replace(/^BILL-/i, '');
   const withPrefix = term.toUpperCase().startsWith('DRS-') ? term : `DRS-${term}`;
+  const withBillPrefix = term.toUpperCase().startsWith('BILL-') ? term : `BILL-${term}`;
 
   const conditions = [
+    { billNumber: { $regex: new RegExp(`^${term}$`, 'i') } },
+    { billNumber: { $regex: new RegExp(`^${withBillPrefix}$`, 'i') } },
+    { billNumber: { $regex: new RegExp(`^BILL-${withPrefix}$`, 'i') } },
     { orderCode: { $regex: new RegExp(`^${term}$`, 'i') } },
     { orderCode: { $regex: new RegExp(`^${withPrefix}$`, 'i') } },
     { pickupToken: { $regex: new RegExp(`^${term}$`, 'i') } },
@@ -99,8 +103,10 @@ export const createWalkInOrder = async (req, res) => {
     const orderCode = await generateOrderCode();
     const pickupToken = orderCode; // Consistent DRS-XXXX format
     const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
+    const billNumber = `BILL-${orderCode}`;
+    const now = new Date();
 
-    // 3. Create WALK_IN Order document
+    // 3. Create WALK_IN Order document (Bill automatically printed at counter)
     const order = await Order.create({
       orderCode,
       orderType: 'WALK_IN',
@@ -121,6 +127,12 @@ export const createWalkInOrder = async (req, res) => {
       paymentMethod,
       paymentStatus: paymentStatus || 'paid',
       status: 'Placed',
+      billNumber,
+      billStatus: 'PRINTED',
+      billGeneratedAt: now,
+      billPrintedAt: now,
+      billPrintCount: 1,
+      handoverStatus: 'PENDING',
     });
 
     // 4. Real-time broadcast to kitchen and admin boards
@@ -157,29 +169,41 @@ export const createWalkInOrder = async (req, res) => {
   }
 };
 
-// @desc    Get All Orders for Handover Management Queue (Pending vs Completed)
+// @desc    Get All Orders for Handover Management Queue (Awaiting vs Pending vs Completed)
 // @route   GET /api/admin/pos/handover-orders
 // @access  Private/Admin
 export const getHandoverOrders = async (req, res) => {
   try {
-    const { filter = 'pending', search = '' } = req.query;
+    const { filter = 'awaiting', search = '' } = req.query;
     const query = {};
 
-    if (filter === 'completed') {
-      query.status = { $in: ['Handover Bill', 'Completed'] };
+    if (filter === 'awaiting') {
+      // Primary queue: paid and bill printed, waiting for physical collection at food counter
+      query.handoverStatus = 'PENDING';
+      query.paymentStatus = 'paid';
+      query.billStatus = 'PRINTED';
+      query.status = { $ne: 'Cancelled' };
+    } else if (filter === 'completed') {
+      query.$or = [
+        { handoverStatus: 'COMPLETED' },
+        { status: { $in: ['Handover Bill', 'Completed'] } },
+      ];
+    } else if (filter === 'pending') {
+      // All pending handovers (including awaiting bill print)
+      query.handoverStatus = { $ne: 'COMPLETED' };
+      query.status = { $nin: ['Handover Bill', 'Completed', 'Cancelled'] };
     } else if (filter === 'all') {
-      query.status = { $in: ['Ready', 'Pickup Bill', 'Handover Bill', 'Completed'] };
+      query.status = { $nin: ['Cancelled'] };
     } else {
-      // Pending handovers: orders waiting for final collection & bill print ('Pickup Bill' or 'Ready')
-      query.status = { $in: ['Pickup Bill', 'Ready'] };
-      query.handoverVerified = { $ne: true };
+      // Default fallback
+      query.handoverStatus = 'PENDING';
+      query.status = { $nin: ['Handover Bill', 'Completed', 'Cancelled'] };
     }
 
     if (search && search.trim()) {
       const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const searchRegex = new RegExp(safeSearch, 'i');
 
-      // Match online registered users by name, phone, registerNumber, staffId
       const matchingUsers = await User.find({
         $or: [
           { name: searchRegex },
@@ -191,7 +215,8 @@ export const getHandoverOrders = async (req, res) => {
       }).select('_id').lean();
       const userIds = matchingUsers.map((u) => u._id);
 
-      query.$or = [
+      const searchConditions = [
+        { billNumber: searchRegex },
         { orderCode: searchRegex },
         { pickupToken: searchRegex },
         { 'walkInCustomer.name': searchRegex },
@@ -200,23 +225,50 @@ export const getHandoverOrders = async (req, res) => {
         { 'walkInCustomer.staffId': searchRegex },
         ...(userIds.length > 0 ? [{ user: { $in: userIds } }] : []),
       ];
+
+      query.$and = [
+        ...(query.$and || []),
+        { $or: searchConditions },
+      ];
     }
 
-    const [orders, pendingCount, completedCount] = await Promise.all([
+    const [orders, awaitingCount, pendingCount, completedCount] = await Promise.all([
       Order.find(query)
         .populate('user', 'name email phone role accountType studentDetails staffDetails')
         .populate('cashier', 'name')
+        .populate('handoverVerifiedBy', 'name')
         .sort(filter === 'completed' ? { completedAt: -1, updatedAt: -1 } : { updatedAt: 1 })
         .lean(),
-      Order.countDocuments({ status: { $in: ['Pickup Bill', 'Ready'] }, handoverVerified: { $ne: true } }),
-      Order.countDocuments({ status: { $in: ['Handover Bill', 'Completed'] } }),
+      Order.countDocuments({
+        handoverStatus: 'PENDING',
+        paymentStatus: 'paid',
+        billStatus: 'PRINTED',
+        status: { $ne: 'Cancelled' },
+      }),
+      Order.countDocuments({
+        handoverStatus: { $ne: 'COMPLETED' },
+        status: { $nin: ['Handover Bill', 'Completed', 'Cancelled'] },
+      }),
+      Order.countDocuments({
+        $or: [
+          { handoverStatus: 'COMPLETED' },
+          { status: { $in: ['Handover Bill', 'Completed'] } },
+        ],
+      }),
     ]);
+
+    // Ensure billNumber is defaulted if not set
+    const enrichedOrders = orders.map((o) => ({
+      ...o,
+      billNumber: o.billNumber || `BILL-${o.orderCode}`,
+    }));
 
     res.json({
       success: true,
-      count: orders.length,
-      data: orders,
+      count: enrichedOrders.length,
+      data: enrichedOrders,
       stats: {
+        awaiting: awaitingCount,
         pending: pendingCount,
         completed: completedCount,
       },
@@ -234,7 +286,7 @@ export const getReadyOrders = async (req, res) => {
     const readyOrders = await Order.find({ status: { $in: ['Ready', 'Pickup Bill'] } })
       .populate('user', 'name phone studentDetails staffDetails')
       .populate('cashier', 'name')
-      .sort({ updatedAt: 1 }) // Oldest ready order first
+      .sort({ updatedAt: 1 })
       .lean();
 
     res.json({
@@ -247,16 +299,125 @@ export const getReadyOrders = async (req, res) => {
   }
 };
 
-// @desc    Verify Pickup & Handover Food to Customer (Status -> Handover Bill)
+// @desc    BUTTON 1: Print Thermal Bill (Confirms payment & marks billStatus -> PRINTED)
+// @route   POST /api/admin/pos/print-bill
+// @access  Private/Admin
+export const printBill = async (req, res) => {
+  try {
+    const { orderId, token, billNumber } = req.body;
+    const queryTerm = orderId || token || billNumber;
+
+    if (!queryTerm) {
+      return res.status(400).json({ success: false, message: 'Please provide an order ID, pickup token, or bill number.' });
+    }
+
+    const query = buildSafeOrderQuery(queryTerm);
+    const order = await Order.findOne(query)
+      .populate('user', 'name email phone studentDetails staffDetails')
+      .populate('cashier', 'name');
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: `No order found matching "${queryTerm}".` });
+    }
+
+    // Payment validation: Section 3: Only allow bill printing after successful payment confirmation
+    if (order.paymentStatus !== 'paid') {
+      return res.status(400).json({
+        success: false,
+        unpaid: true,
+        message: `Payment of ₹${order.total} has not been collected! Please confirm payment before printing the physical bill.`,
+        order,
+      });
+    }
+
+    const isFirstPrint = !order.billNumber || order.billStatus !== 'PRINTED';
+    if (!order.billNumber) {
+      order.billNumber = `BILL-${order.orderCode}`;
+    }
+    if (!order.billGeneratedAt) {
+      order.billGeneratedAt = new Date();
+    }
+    order.billStatus = 'PRINTED';
+    order.billPrintedAt = new Date();
+    order.billPrintCount = (order.billPrintCount || 0) + 1;
+
+    // Move status to Pickup Bill / Awaiting Handover if in earlier stages
+    if (['Placed', 'Confirmed', 'Preparing', 'Ready'].includes(order.status)) {
+      order.status = 'Pickup Bill';
+    }
+
+    await order.save();
+
+    const io = req.app.get('socketio');
+    if (io) {
+      io.to('admin').emit('order:updated', order);
+    }
+
+    res.json({
+      success: true,
+      isReprint: !isFirstPrint,
+      message: isFirstPrint
+        ? `Bill #${order.billNumber} generated and printed successfully.`
+        : `Bill #${order.billNumber} reprinted (Copy #${order.billPrintCount}).`,
+      data: order,
+    });
+  } catch (error) {
+    console.error('Print bill error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Record Cash/Counter Payment before Bill Printing
+// @route   POST /api/admin/pos/record-payment
+// @access  Private/Admin
+export const recordPayment = async (req, res) => {
+  try {
+    const { orderId, token, paymentMethod = 'cash' } = req.body;
+    const queryTerm = orderId || token;
+
+    if (!queryTerm) {
+      return res.status(400).json({ success: false, message: 'Please provide an order ID or pickup token.' });
+    }
+
+    const query = buildSafeOrderQuery(queryTerm);
+    const order = await Order.findOne(query);
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: `No order found matching "${queryTerm}".` });
+    }
+
+    order.paymentStatus = 'paid';
+    if (paymentMethod) {
+      order.paymentMethod = paymentMethod;
+    }
+    await order.save();
+
+    const io = req.app.get('socketio');
+    if (io) {
+      io.to('admin').emit('order:updated', order);
+    }
+
+    res.json({
+      success: true,
+      message: `Payment of ₹${order.total} confirmed as ${String(order.paymentMethod).toUpperCase()}!`,
+      data: order,
+    });
+  } catch (error) {
+    console.error('Record payment error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    BUTTON 2: Handover Food (Physical food collection confirmation -> Status: Completed)
 // @route   POST /api/admin/pos/verify-pickup
 // @access  Private/Admin
 export const verifyAndHandoverOrder = async (req, res) => {
   try {
-    const { token, orderId, secret } = req.body;
-    const queryTerm = token || orderId || secret || req.params.id;
+    const { token, orderId, secret, billNumber } = req.body;
+    const queryTerm = token || orderId || secret || billNumber || req.params.id;
 
     if (!queryTerm) {
-      return res.status(400).json({ success: false, message: 'Please provide a pickup token, Order Code, or QR secret.' });
+      return res.status(400).json({ success: false, message: 'Please provide a pickup token, Order Code, or Bill Number.' });
     }
 
     const query = buildSafeOrderQuery(queryTerm);
@@ -267,14 +428,19 @@ export const verifyAndHandoverOrder = async (req, res) => {
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: `No order found matching "${queryTerm}". Please check the token.`,
+        message: `No order found matching "${queryTerm}". Please check the physical bill or token.`,
       });
     }
 
     // STRICT DUPLICATE HANDOVER PROTECTION
-    if (order.status === 'Handover Bill' || order.status === 'Completed' || order.handoverVerified) {
-      const collectedTime = order.completedAt
-        ? new Date(order.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+    if (
+      order.status === 'Completed' ||
+      order.status === 'Handover Bill' ||
+      order.handoverVerified ||
+      order.handoverStatus === 'COMPLETED'
+    ) {
+      const collectedTime = order.completedAt || order.handoverVerifiedAt
+        ? new Date(order.completedAt || order.handoverVerifiedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
         : 'earlier';
 
       return res.status(409).json({
@@ -293,16 +459,35 @@ export const verifyAndHandoverOrder = async (req, res) => {
       });
     }
 
-    // Update order status to Handover Bill (final collected state)
-    order.status = 'Handover Bill';
+    // Payment validation: Cannot handover unpaid food
+    if (order.paymentStatus !== 'paid') {
+      return res.status(400).json({
+        success: false,
+        unpaid: true,
+        message: `Payment of ₹${order.total} has not been collected! Please collect payment before handing over food.`,
+        order,
+      });
+    }
+
+    // Update order status to Completed & mark physical handover
+    order.status = 'Completed';
     order.completedAt = new Date();
+    order.handoverStatus = 'COMPLETED';
     order.handoverVerified = true;
     order.handoverVerifiedAt = new Date();
     order.handoverVerifiedBy = req.user._id;
 
-    // Settle unpaid counter COD if applicable
-    if (order.paymentStatus === 'cod' || order.paymentStatus === 'pending') {
-      order.paymentStatus = 'paid';
+    // Ensure billNumber is populated
+    if (!order.billNumber) {
+      order.billNumber = `BILL-${order.orderCode}`;
+    }
+    if (!order.billGeneratedAt) {
+      order.billGeneratedAt = new Date();
+    }
+    if (order.billStatus === 'NOT_GENERATED') {
+      order.billStatus = 'PRINTED';
+      order.billPrintedAt = new Date();
+      order.billPrintCount = (order.billPrintCount || 0) + 1;
     }
 
     await order.save();
@@ -317,14 +502,15 @@ export const verifyAndHandoverOrder = async (req, res) => {
         orderId: order._id,
         orderCode: order.orderCode,
         pickupToken: order.pickupToken || order.orderCode,
-        status: 'Handover Bill',
+        status: 'Completed',
       });
+
       if (order.user) {
-        // Update customer tracking timeline immediately without generating a customer notification
+        // Update customer tracking timeline immediately
         io.to(`user:${order.user._id || order.user}`).emit('order:statusChanged', {
           orderId: order._id,
           orderCode: order.orderCode,
-          status: 'Handover Bill',
+          status: 'Completed',
           paymentStatus: order.paymentStatus,
           order,
         });
@@ -333,7 +519,7 @@ export const verifyAndHandoverOrder = async (req, res) => {
 
     res.json({
       success: true,
-      message: `✓ Food handed over and bill completed! Order #${order.orderCode} (Token #${order.pickupToken}) marked as Handover Bill.`,
+      message: `✓ Food handed over! Order #${order.orderCode} (Token #${order.pickupToken}) marked as Completed.`,
       data: order,
     });
   } catch (error) {
@@ -342,7 +528,7 @@ export const verifyAndHandoverOrder = async (req, res) => {
   }
 };
 
-// @desc    Get Completed Bill History & Sales Archive (with Date Filters & Stats)
+// @desc    Get Completed Bill History & Daily Sales Archive (with Date Filters & Stats)
 // @route   GET /api/admin/bills
 // @access  Private/Admin
 export const getBillArchive = async (req, res) => {
@@ -353,32 +539,36 @@ export const getBillArchive = async (req, res) => {
       endDate,
       orderType = 'ALL',
       paymentMethod = 'ALL',
-      status = 'Completed',
+      handoverStatus = 'ALL',
       search = '',
       page = 1,
       limit = 20,
     } = req.query;
 
-    const query = {};
+    const query = {
+      $or: [
+        { billStatus: { $in: ['GENERATED', 'PRINTED'] } },
+        { status: { $in: ['Handover Bill', 'Completed'] } },
+        { billNumber: { $exists: true, $ne: '' } },
+      ],
+    };
 
-    // 1. Status Filter (default completed archive, or ALL)
-    if (status === 'Completed' || status === 'Handover Bill') {
-      query.status = { $in: ['Handover Bill', 'Completed'] };
-    } else if (status !== 'ALL') {
-      query.status = status;
-    }
-
-    // 2. Order Type Filter
+    // 1. Order Channel Filter
     if (orderType && orderType !== 'ALL') {
       query.orderType = orderType.toUpperCase();
     }
 
-    // 3. Payment Method Filter
+    // 2. Payment Method Filter
     if (paymentMethod && paymentMethod !== 'ALL') {
       query.paymentMethod = paymentMethod.toLowerCase();
     }
 
-    // 4. Date Range Filtering based on completion/creation
+    // 3. Handover Status Filter
+    if (handoverStatus && handoverStatus !== 'ALL') {
+      query.handoverStatus = handoverStatus.toUpperCase();
+    }
+
+    // 4. Date Range Filtering based on creation/billing
     const now = new Date();
     let rangeStart = null;
     let rangeEnd = null;
@@ -393,14 +583,10 @@ export const getBillArchive = async (req, res) => {
       rangeEnd = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
     } else if (dateRange === '7days') {
       rangeStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      rangeEnd = new Date();
     } else if (dateRange === '30days') {
       rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    } else if (dateRange === '3months') {
-      rangeStart = new Date(now);
-      rangeStart.setMonth(rangeStart.getMonth() - 3);
-    } else if (dateRange === '6months') {
-      rangeStart = new Date(now);
-      rangeStart.setMonth(rangeStart.getMonth() - 6);
+      rangeEnd = new Date();
     } else if (dateRange === 'custom' && (startDate || endDate)) {
       if (startDate) rangeStart = new Date(startDate);
       if (endDate) {
@@ -410,24 +596,41 @@ export const getBillArchive = async (req, res) => {
     }
 
     if (rangeStart || rangeEnd) {
-      const dateField = status === 'Completed' ? 'completedAt' : 'createdAt';
-      query[dateField] = {};
-      if (rangeStart) query[dateField].$gte = rangeStart;
-      if (rangeEnd) query[dateField].$lte = rangeEnd;
+      query.createdAt = {};
+      if (rangeStart) query.createdAt.$gte = rangeStart;
+      if (rangeEnd) query.createdAt.$lte = rangeEnd;
     }
 
-    // 5. Search Filter across Token, OrderCode, Customer, Phone
+    // 5. Search Filter across BillNumber, OrderCode, Token, Customer, Phone
     if (search && search.trim()) {
       const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const searchRegex = new RegExp(safeSearch, 'i');
 
-      query.$or = [
-        { orderCode: searchRegex },
-        { pickupToken: searchRegex },
-        { 'walkInCustomer.name': searchRegex },
-        { 'walkInCustomer.phone': searchRegex },
-        { 'walkInCustomer.registerNumber': searchRegex },
-        { 'walkInCustomer.staffId': searchRegex },
+      const matchingUsers = await User.find({
+        $or: [
+          { name: searchRegex },
+          { email: searchRegex },
+          { phone: searchRegex },
+          { 'studentDetails.registerNumber': searchRegex },
+          { 'staffDetails.staffId': searchRegex },
+        ],
+      }).select('_id').lean();
+      const userIds = matchingUsers.map((u) => u._id);
+
+      query.$and = [
+        ...(query.$and || []),
+        {
+          $or: [
+            { billNumber: searchRegex },
+            { orderCode: searchRegex },
+            { pickupToken: searchRegex },
+            { 'walkInCustomer.name': searchRegex },
+            { 'walkInCustomer.phone': searchRegex },
+            { 'walkInCustomer.registerNumber': searchRegex },
+            { 'walkInCustomer.staffId': searchRegex },
+            ...(userIds.length > 0 ? [{ user: { $in: userIds } }] : []),
+          ],
+        },
       ];
     }
 
@@ -435,12 +638,13 @@ export const getBillArchive = async (req, res) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     const skip = (pageNum - 1) * limitNum;
 
-    // 6. Execute Queries & Aggregation in Parallel
+    // 6. Execute Queries & Aggregation in Parallel (Section 7 Daily Founder Report Stats)
     const [orders, totalCount, summaryAgg] = await Promise.all([
       Order.find(query)
         .populate('user', 'name email phone studentDetails staffDetails')
         .populate('cashier', 'name')
-        .sort({ completedAt: -1, createdAt: -1 })
+        .populate('handoverVerifiedBy', 'name')
+        .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
         .lean(),
@@ -450,22 +654,86 @@ export const getBillArchive = async (req, res) => {
         {
           $group: {
             _id: null,
-            totalCompletedOrders: { $sum: 1 },
-            totalSales: { $sum: '$total' },
-            onlineSales: {
-              $sum: { $cond: [{ $eq: ['$orderType', 'ONLINE'] }, '$total', 0] },
-            },
-            walkInSales: {
-              $sum: { $cond: [{ $eq: ['$orderType', 'WALK_IN'] }, '$total', 0] },
-            },
-            cashSales: {
+            totalBillsPrinted: {
               $sum: {
-                $cond: [{ $in: ['$paymentMethod', ['cash', 'cod']] }, '$total', 0],
+                $cond: [
+                  {
+                    $or: [
+                      { $eq: ['$billStatus', 'PRINTED'] },
+                      { $gt: ['$billPrintCount', 0] },
+                      { $and: [{ $ne: ['$billNumber', ''] }, { $ne: ['$billNumber', null] }] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
               },
             },
-            digitalSales: {
+            totalOrders: { $sum: 1 },
+            totalSales: {
               $sum: {
-                $cond: [{ $in: ['$paymentMethod', ['razorpay', 'upi', 'card']] }, '$total', 0],
+                $cond: [{ $eq: ['$paymentStatus', 'paid'] }, '$total', 0],
+              },
+            },
+            cashCollections: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $in: ['$paymentMethod', ['cash', 'cod']] },
+                      { $eq: ['$paymentStatus', 'paid'] },
+                    ],
+                  },
+                  '$total',
+                  0,
+                ],
+              },
+            },
+            upiCollections: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $in: ['$paymentMethod', ['upi', 'online', 'razorpay', 'card']] },
+                      { $eq: ['$paymentStatus', 'paid'] },
+                    ],
+                  },
+                  '$total',
+                  0,
+                ],
+              },
+            },
+            pendingPayments: {
+              $sum: {
+                $cond: [{ $ne: ['$paymentStatus', 'paid'] }, '$total', 0],
+              },
+            },
+            completedHandovers: {
+              $sum: {
+                $cond: [
+                  {
+                    $or: [
+                      { $eq: ['$handoverStatus', 'COMPLETED'] },
+                      { $in: ['$status', ['Completed', 'Handover Bill']] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            pendingHandovers: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $ne: ['$handoverStatus', 'COMPLETED'] },
+                      { $nin: ['$status', ['Completed', 'Handover Bill', 'Cancelled']] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
               },
             },
           },
@@ -474,18 +742,27 @@ export const getBillArchive = async (req, res) => {
     ]);
 
     const summary = summaryAgg[0] || {
-      totalCompletedOrders: 0,
+      totalBillsPrinted: 0,
+      totalOrders: 0,
       totalSales: 0,
-      onlineSales: 0,
-      walkInSales: 0,
-      cashSales: 0,
-      digitalSales: 0,
+      cashCollections: 0,
+      upiCollections: 0,
+      pendingPayments: 0,
+      completedHandovers: 0,
+      pendingHandovers: 0,
     };
+
+    const enrichedOrders = orders.map((o) => ({
+      ...o,
+      billNumber: o.billNumber || `BILL-${o.orderCode}`,
+      billStatus: o.billStatus || (o.handoverVerified ? 'PRINTED' : 'GENERATED'),
+      handoverStatus: o.handoverStatus || (o.handoverVerified || o.status === 'Completed' || o.status === 'Handover Bill' ? 'COMPLETED' : 'PENDING'),
+    }));
 
     res.json({
       success: true,
       summary,
-      data: orders,
+      data: enrichedOrders,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -495,6 +772,155 @@ export const getBillArchive = async (req, res) => {
     });
   } catch (error) {
     console.error('Bill archive error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get Daily Sales Breakdown for Founder Report
+// @route   GET /api/admin/bills/founder-report
+// @access  Private/Admin
+export const getFounderReport = async (req, res) => {
+  try {
+    const { dateRange = 'today', startDate, endDate } = req.query;
+
+    const now = new Date();
+    let rangeStart = null;
+    let rangeEnd = null;
+
+    if (dateRange === 'today') {
+      rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      rangeEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    } else if (dateRange === 'yesterday') {
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      rangeStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0, 0);
+      rangeEnd = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
+    } else if (dateRange === '7days') {
+      rangeStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      rangeEnd = new Date();
+    } else if (dateRange === '30days') {
+      rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      rangeEnd = new Date();
+    } else if (dateRange === 'custom' && (startDate || endDate)) {
+      if (startDate) rangeStart = new Date(startDate);
+      if (endDate) {
+        rangeEnd = new Date(endDate);
+        rangeEnd.setHours(23, 59, 59, 999);
+      }
+    }
+
+    const matchQuery = {};
+    if (rangeStart || rangeEnd) {
+      matchQuery.createdAt = {};
+      if (rangeStart) matchQuery.createdAt.$gte = rangeStart;
+      if (rangeEnd) matchQuery.createdAt.$lte = rangeEnd;
+    }
+
+    const orders = await Order.find(matchQuery).lean();
+
+    let totalOrders = orders.length;
+    let totalBillsPrinted = 0;
+    let totalItemsSold = 0;
+    let grossSales = 0;
+    let discounts = 0;
+    let netSales = 0;
+    let cashCollections = 0;
+    let upiCollections = 0;
+    let pendingPayments = 0;
+    let completedHandovers = 0;
+    let pendingHandovers = 0;
+
+    const dailyBreakdown = {};
+
+    for (const ord of orders) {
+      if (ord.status === 'Cancelled') continue;
+
+      const isPaid = ord.paymentStatus === 'paid';
+      const ordSubtotal = Number(ord.subtotal || ord.total || 0);
+      const ordDiscount = Number(ord.discount || 0);
+      const ordTotal = Number(ord.total || 0);
+
+      if (ord.billStatus === 'PRINTED' || ord.billPrintCount > 0 || (ord.billNumber && ord.billNumber !== '')) {
+        totalBillsPrinted++;
+      }
+
+      if (ord.handoverStatus === 'COMPLETED' || ord.status === 'Completed' || ord.status === 'Handover Bill') {
+        completedHandovers++;
+      } else {
+        pendingHandovers++;
+      }
+
+      grossSales += ordSubtotal;
+      discounts += ordDiscount;
+
+      if (isPaid) {
+        netSales += ordTotal;
+        if (ord.paymentMethod === 'cash' || ord.paymentMethod === 'cod') {
+          cashCollections += ordTotal;
+        } else if (['upi', 'online', 'razorpay', 'card'].includes(ord.paymentMethod)) {
+          upiCollections += ordTotal;
+        }
+      } else {
+        pendingPayments += ordTotal;
+      }
+
+      for (const it of ord.items || []) {
+        totalItemsSold += Number(it.quantity || 1);
+      }
+
+      const dKey = new Date(ord.createdAt).toISOString().split('T')[0];
+      if (!dailyBreakdown[dKey]) {
+        dailyBreakdown[dKey] = {
+          date: dKey,
+          ordersCount: 0,
+          grossSales: 0,
+          discounts: 0,
+          netSales: 0,
+          cashCollected: 0,
+          upiCollected: 0,
+          pendingAmount: 0,
+          itemsCount: 0,
+        };
+      }
+      dailyBreakdown[dKey].ordersCount++;
+      dailyBreakdown[dKey].grossSales += ordSubtotal;
+      dailyBreakdown[dKey].discounts += ordDiscount;
+      if (isPaid) {
+        dailyBreakdown[dKey].netSales += ordTotal;
+        if (ord.paymentMethod === 'cash' || ord.paymentMethod === 'cod') {
+          dailyBreakdown[dKey].cashCollected += ordTotal;
+        }
+        if (['upi', 'online', 'razorpay', 'card'].includes(ord.paymentMethod)) {
+          dailyBreakdown[dKey].upiCollected += ordTotal;
+        }
+      } else {
+        dailyBreakdown[dKey].pendingAmount += ordTotal;
+      }
+      dailyBreakdown[dKey].itemsCount += (ord.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        dateRange,
+        startDate: rangeStart,
+        endDate: rangeEnd,
+        totalOrders,
+        totalBillsPrinted,
+        totalItemsSold,
+        grossSales,
+        discounts,
+        netSales,
+        cashCollections,
+        upiCollections,
+        pendingPayments,
+        completedHandovers,
+        pendingHandovers,
+        dailyBreakdown: Object.values(dailyBreakdown).sort((a, b) => b.date.localeCompare(a.date)),
+      },
+    });
+  } catch (error) {
+    console.error('Founder report error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -512,15 +938,23 @@ export const getBillById = async (req, res) => {
     const order = await Order.findOne(query)
       .populate('user', 'name email phone studentDetails staffDetails')
       .populate('cashier', 'name')
+      .populate('handoverVerifiedBy', 'name')
       .lean();
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Bill record not found' });
     }
 
+    const enriched = {
+      ...order,
+      billNumber: order.billNumber || `BILL-${order.orderCode}`,
+      billStatus: order.billStatus || (order.handoverVerified ? 'PRINTED' : 'GENERATED'),
+      handoverStatus: order.handoverStatus || (order.handoverVerified || order.status === 'Completed' || order.status === 'Handover Bill' ? 'COMPLETED' : 'PENDING'),
+    };
+
     res.json({
       success: true,
-      data: order,
+      data: enriched,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -598,7 +1032,7 @@ export const cleanupExpiredBills = async (req, res) => {
 
     if (preview) {
       const sample = await Order.find(cleanupFilter)
-        .select('orderCode pickupToken total completedAt')
+        .select('orderCode pickupToken billNumber total completedAt')
         .limit(10)
         .lean();
 
@@ -634,4 +1068,3 @@ export const cleanupExpiredBills = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
