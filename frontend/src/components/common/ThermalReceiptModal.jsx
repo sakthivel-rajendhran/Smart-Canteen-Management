@@ -16,7 +16,26 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
   if (!isOpen || !order) return null;
 
   const is58mm = paperWidth === '58mm';
-  const orderDate = new Date(order.createdAt || Date.now());
+
+  // Support both Order and InternalBill documents
+  const orderCode = order.orderCode || order.order?.orderCode || 'N/A';
+  const billNumber = order.billNumber || order.internalBillNumber || `IB-${orderCode}`;
+  const pickupToken = order.pickupToken || String(orderCode).replace('DRS-', '');
+
+  const printCount = Number(order.billPrintCount || 1);
+  const isReprint = printCount > 1;
+
+  const isWalkIn = order.orderChannel === 'POS' || order.orderType === 'WALK_IN';
+  const customerName = order.customerName || (
+    isWalkIn
+      ? (order.walkInCustomer?.name || 'Walk-in Customer')
+      : (order.user?.name || 'Student / Faculty')
+  );
+  const customerPhone = order.customerPhone || (isWalkIn ? order.walkInCustomer?.phone : order.user?.phone) || '';
+  const customerReg = order.customerRegNo || (isWalkIn ? order.walkInCustomer?.registerNumber : order.user?.studentDetails?.registerNumber) || '';
+  const customerStaffId = order.customerStaffId || (isWalkIn ? order.walkInCustomer?.staffId : order.user?.staffDetails?.staffId) || '';
+
+  const orderDate = new Date(order.generatedAt || order.internalBillPrintedAt || order.createdAt || Date.now());
   const formattedDate = orderDate.toLocaleDateString('en-IN', {
     day: '2-digit',
     month: '2-digit',
@@ -28,29 +47,13 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
     hour12: true,
   });
 
-  const isWalkIn = order.orderType === 'WALK_IN';
-  const customerName = isWalkIn
-    ? (order.walkInCustomer?.name || 'Walk-in Customer')
-    : (order.user?.name || 'Student / Faculty');
-  const customerPhone = isWalkIn
-    ? order.walkInCustomer?.phone
-    : order.user?.phone;
-  const customerReg = isWalkIn
-    ? order.walkInCustomer?.registerNumber
-    : order.user?.studentDetails?.registerNumber;
-  const customerStaffId = isWalkIn
-    ? order.walkInCustomer?.staffId
-    : order.user?.staffDetails?.staffId;
-
   const subtotal = Number(order.subtotal || order.total || 0);
   const discount = Number(order.discount || 0);
-  const total = Number(order.total || 0);
+  const total = Number(order.grandTotal || order.total || 0);
 
   const paymentMethodUpper = String(order.paymentMethod || 'cash').toUpperCase();
   const paymentStatusUpper = String(order.paymentStatus || 'paid').toUpperCase();
   const isPaid = paymentStatusUpper === 'PAID';
-
-  const pickupToken = order.pickupToken || String(order.orderCode || '').replace('DRS-', '');
 
   const handlePrint = () => {
     window.print();
@@ -138,31 +141,31 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
       <div className="thermal-receipt-modal-box bg-white rounded-3xl shadow-2xl border border-stone-200 max-w-lg w-full overflow-hidden flex flex-col max-h-[92vh] print:max-h-none print:shadow-none print:border-none">
         
         {/* Modal Controls Header (Hidden on Print) */}
-        <div className="no-print bg-stone-50 border-b border-stone-200 p-4 flex items-center justify-between gap-3">
+        <div className="no-print bg-[#0b3d2e] text-white p-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-[#0b3d2e]/10 text-[#0b3d2e] flex items-center justify-center font-bold">
+            <div className="w-8 h-8 rounded-xl bg-amber text-stone-950 flex items-center justify-center font-bold">
               <Receipt className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-outfit font-black text-sm text-stone-900 leading-tight">
-                Thermal POS Receipt
+              <h3 className="font-outfit font-black text-sm text-white leading-tight">
+                Internal Sales Record • {billNumber}
               </h3>
-              <p className="text-[11px] text-stone-500 font-medium">
-                Token #{pickupToken} • Order #{order.orderCode}
+              <p className="text-[11px] text-white/70 font-medium">
+                Canteen Accounting & Founder Verification Copy
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             {/* Paper Width Switcher */}
-            <div className="flex bg-stone-200/80 p-0.5 rounded-xl text-xs font-bold">
+            <div className="flex bg-white/10 p-0.5 rounded-xl text-xs font-bold border border-white/10">
               <button
                 type="button"
                 onClick={() => setPaperWidth('80mm')}
                 className={`px-2.5 py-1 rounded-lg transition-all ${
                   paperWidth === '80mm'
-                    ? 'bg-[#0b3d2e] text-white shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900'
+                    ? 'bg-amber text-stone-950 shadow-xs'
+                    : 'text-white/80 hover:text-white'
                 }`}
                 title="80mm POS Billing Paper"
               >
@@ -173,8 +176,8 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
                 onClick={() => setPaperWidth('58mm')}
                 className={`px-2.5 py-1 rounded-lg transition-all ${
                   paperWidth === '58mm'
-                    ? 'bg-[#0b3d2e] text-white shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900'
+                    ? 'bg-amber text-stone-950 shadow-xs'
+                    : 'text-white/80 hover:text-white'
                 }`}
                 title="58mm Compact Mobile Paper"
               >
@@ -186,7 +189,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
             <button
               type="button"
               onClick={handlePrint}
-              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-xs px-3.5 py-2 rounded-xl transition-all shadow-sm active:scale-95"
+              className="flex items-center gap-1.5 bg-amber hover:bg-amber-dark text-stone-950 font-black text-xs px-3.5 py-2 rounded-xl transition-all shadow-sm active:scale-95"
             >
               <Printer className="w-4 h-4" />
               <span>Print</span>
@@ -196,7 +199,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
             <button
               type="button"
               onClick={onClose}
-              className="p-2 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-xl transition-colors"
+              className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-xl transition-colors"
               title="Close modal"
             >
               <X className="w-5 h-5" />
@@ -228,11 +231,14 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
               <p className="font-bold uppercase tracking-tight text-[11px]">
                 DRS COLLEGE CANTEEN
               </p>
-              <p className="text-[10px] text-stone-700 tracking-tight">
-                DRS College of Engg & Tech
+              <div className="my-1 py-0.5 bg-black text-white font-black text-[10px] uppercase tracking-wider">
+                INTERNAL SALES RECORD
+              </div>
+              <p className="text-[9px] text-stone-700 tracking-tight">
+                For Canteen Accounting & Founder Audit Proof
               </p>
               
-              <div className="my-2 border-b border-dashed border-black" />
+              <div className="my-1.5 border-b border-dashed border-black" />
             </div>
 
             {/* Big Token Number Callout */}
@@ -241,16 +247,21 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
               <span className={`font-black tracking-widest ${is58mm ? 'text-2xl' : 'text-3xl'} leading-none`}>
                 #{pickupToken}
               </span>
-              <span className="text-[9px] font-medium text-stone-600 block mt-0.5">
-                {isWalkIn ? '★ DIRECT COUNTER SALE ★' : '★ ONLINE WEB ORDER ★'}
+              <span className="text-[9px] font-black uppercase text-stone-800 block mt-0.5">
+                {isWalkIn ? '★ DIRECT COUNTER POS SALE ★' : '★ ONLINE APP ORDER ★'}
               </span>
             </div>
 
             {/* Metadata */}
             <div className="thermal-avoid-break text-[11px] space-y-1 py-1.5">
+              <div className="flex justify-between font-black">
+                <span>BILL NUMBER:</span>
+                <span className="font-mono">{billNumber}</span>
+              </div>
+
               <div className="flex justify-between">
                 <span className="font-semibold">ORDER ID:</span>
-                <span className="font-mono font-bold">#{order.orderCode}</span>
+                <span className="font-mono font-bold">#{orderCode}</span>
               </div>
 
               <div className="flex justify-between">
@@ -259,7 +270,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
               </div>
 
               <div className="flex justify-between">
-                <span className="font-semibold">CHANNEL:</span>
+                <span className="font-semibold">ORDER CHANNEL:</span>
                 <span className="font-black uppercase">{isWalkIn ? 'WALK-IN POS' : 'ONLINE APP'}</span>
               </div>
 
@@ -291,13 +302,6 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
                 </div>
               )}
 
-              {order.cashier?.name && (
-                <div className="flex justify-between text-[10px]">
-                  <span className="font-semibold">CASHIER:</span>
-                  <span className="font-medium">{order.cashier.name}</span>
-                </div>
-              )}
-
               <div className="flex justify-between text-[10px] pt-0.5">
                 <span className="font-semibold">PAY METHOD:</span>
                 <span className="font-bold">{paymentMethodUpper}</span>
@@ -306,11 +310,18 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
               <div className="flex justify-between text-[10px]">
                 <span className="font-semibold">PAY STATUS:</span>
                 <span className={`font-black ${isPaid ? 'underline' : ''}`}>
-                  {isPaid ? 'PAID / COLLECTED' : 'PENDING'}
+                  {isPaid ? 'PAID / COLLECTED' : 'PENDING (COD)'}
                 </span>
               </div>
 
-              <div className="my-2 border-b border-dashed border-black" />
+              <div className="flex justify-between text-[10px]">
+                <span className="font-semibold">COPY STATUS:</span>
+                <span className="font-bold">
+                  {isReprint ? `REPRINT (COPY #${printCount})` : 'ORIGINAL INTERNAL COPY'}
+                </span>
+              </div>
+
+              <div className="my-1.5 border-b border-dashed border-black" />
             </div>
 
             {/* Items Table */}
@@ -337,7 +348,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
                 })}
               </div>
 
-              <div className="my-2 border-b border-dashed border-black" />
+              <div className="my-1.5 border-b border-dashed border-black" />
             </div>
 
             {/* Totals */}
@@ -368,20 +379,24 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
               <div className="my-1 border-b-2 border-black" />
             </div>
 
-            {/* Footer */}
+            {/* Footer: Strictly Internal Accounting */}
             <div className="thermal-avoid-break text-center pt-2 text-[10px] space-y-1 leading-snug">
-              <p className="font-black uppercase tracking-wider">THANK YOU FOR YOUR VISIT!</p>
-              <p className="text-stone-700 text-[9px]">Please collect food when your token #{pickupToken} is called.</p>
-              <div className="pt-1.5 font-black tracking-tight text-[10px]">DRS QUICK SERVE</div>
-              <div className="pt-1 text-[8px] text-stone-500 font-mono">*** END OF RECEIPT ***</div>
+              <div className="border border-black p-1 rounded font-black text-[9px] uppercase tracking-wider bg-stone-50">
+                INTERNAL BILL – NOT FOR CUSTOMER DISTRIBUTION
+              </div>
+              <p className="text-stone-700 text-[8px] pt-0.5">
+                This receipt is exclusively for internal canteen accounting and management verification.
+              </p>
+              <div className="pt-1 text-[8px] text-stone-500 font-mono">*** END OF INTERNAL RECORD ***</div>
             </div>
+
           </div>
         </div>
 
         {/* Modal Bottom Bar (Hidden on Print) */}
         <div className="no-print bg-stone-50 border-t border-stone-200 p-3 sm:p-4 flex items-center justify-between gap-3">
           <div className="text-[11px] text-stone-500">
-            Thermal print ready for 80mm & 58mm POS receipt printers.
+            Internal thermal print ready for 80mm & 58mm POS receipt printers.
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -397,7 +412,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
               className="flex items-center gap-1.5 bg-[#0b3d2e] hover:bg-[#1a7a45] text-white font-black text-xs px-5 py-2.5 rounded-xl shadow-md transition active:scale-95"
             >
               <Printer className="w-4 h-4" />
-              <span>Print Bill Now</span>
+              <span>Print Internal Bill</span>
             </button>
           </div>
         </div>
@@ -408,4 +423,3 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
 };
 
 export default ThermalReceiptModal;
-
