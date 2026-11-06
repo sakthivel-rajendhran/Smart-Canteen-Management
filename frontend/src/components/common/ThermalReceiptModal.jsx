@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Printer, X, Receipt, CheckCircle2 } from 'lucide-react';
+import { printPhysicalThermalReceipt } from '../../utils/thermalPrinter';
 
 const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
   const [paperWidth, setPaperWidth] = useState('80mm'); // '80mm' | '58mm'
@@ -7,11 +8,11 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
   useEffect(() => {
     if (isOpen && autoPrint && order) {
       const timer = setTimeout(() => {
-        window.print();
+        printPhysicalThermalReceipt(order, { paperWidth });
       }, 350);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, autoPrint, order]);
+  }, [isOpen, autoPrint, order, paperWidth]);
 
   if (!isOpen || !order) return null;
 
@@ -56,7 +57,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
   const isReprint = printCount > 1;
 
   const handlePrint = () => {
-    window.print();
+    printPhysicalThermalReceipt(order, { paperWidth });
   };
 
   return (
