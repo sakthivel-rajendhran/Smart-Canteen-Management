@@ -260,19 +260,19 @@ const Tracker = () => {
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-4">
+      <div className="flex flex-col sm:flex-row gap-3">
+        <Link 
+          to="/pickup"
+          className="flex-1 bg-amber hover:bg-amber-dark text-stone-950 font-black py-3.5 rounded-2xl transition-all shadow-md shadow-amber/20 text-center flex items-center justify-center gap-2"
+        >
+          <span>🎟️ View Pickup Token & QR</span>
+        </Link>
         <Link 
           to={`/bill/${order.orderCode}`}
           className="flex-1 bg-primary-dark hover:bg-primary text-white font-bold py-3.5 rounded-2xl transition-all shadow-md shadow-primary/20 text-center flex items-center justify-center gap-2"
         >
           <Receipt className="w-4 h-4" />
           <span>View Receipt Bill</span>
-        </Link>
-        <Link 
-          to="/menu"
-          className="flex-1 bg-white border-2 border-border hover:border-primary text-primary-dark hover:text-primary font-bold py-3.5 rounded-2xl transition-all text-center flex items-center justify-center gap-2"
-        >
-          <span>Canteen Menu</span>
         </Link>
       </div>
     </div>

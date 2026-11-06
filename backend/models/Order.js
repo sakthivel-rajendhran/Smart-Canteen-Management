@@ -135,7 +135,6 @@ orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ orderType: 1, createdAt: -1 });
 orderSchema.index({ status: 1, completedAt: -1 });
 orderSchema.index({ completedAt: -1 });
-orderSchema.index({ pickupToken: 1 });
 
 const Order = mongoose.model('Order', orderSchema);
 export default Order;

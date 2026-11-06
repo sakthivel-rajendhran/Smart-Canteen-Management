@@ -806,3 +806,4 @@ const POSBilling = () => {
 };
 
 export default POSBilling;
+

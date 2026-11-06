@@ -36,3 +36,4 @@ const canteenSettingsSchema = new mongoose.Schema(
 
 const CanteenSettings = mongoose.model('CanteenSettings', canteenSettingsSchema);
 export default CanteenSettings;
+

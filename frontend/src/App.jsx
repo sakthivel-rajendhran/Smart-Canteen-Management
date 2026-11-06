@@ -28,6 +28,8 @@ const Tracker = lazy(() => import('./pages/Tracker'));
 const Bill = lazy(() => import('./pages/Bill'));
 const Profile = lazy(() => import('./pages/Profile'));
 const StudentOrders = lazy(() => import('./pages/Orders'));
+const Pickup = lazy(() => import('./pages/Pickup'));
+const PickupDisplay = lazy(() => import('./pages/PickupDisplay'));
 const NotificationCenter = lazy(() => import('./pages/NotificationCenter'));
 
 // Lazy-loaded Admin Pages (includes heavy libraries like Recharts)
@@ -67,6 +69,7 @@ function App() {
                       <Route path="/" element={<Home />} />
                       <Route path="/login" element={<Login />} />
                       <Route path="/menu" element={<Menu />} />
+                      <Route path="/pickup-display" element={<PickupDisplay />} />
 
                       {/* Student Protected routes */}
                       <Route path="/cart" element={
@@ -87,6 +90,11 @@ function App() {
                       <Route path="/orders" element={
                         <ProtectedRoute>
                           <StudentOrders />
+                        </ProtectedRoute>
+                      } />
+                      <Route path="/pickup" element={
+                        <ProtectedRoute>
+                          <Pickup />
                         </ProtectedRoute>
                       } />
                       <Route path="/notifications" element={

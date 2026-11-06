@@ -31,6 +31,7 @@ import {
   Flame,
   ChefHat,
   BellRing,
+  ExternalLink,
 } from 'lucide-react';
 
 const STATUS_PIPELINE = ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Completed'];
@@ -417,6 +418,17 @@ const LiveTracking = () => {
             <span className="hidden sm:inline">{soundEnabled ? 'Alerts ON' : 'Muted'}</span>
           </button>
 
+          <Link
+            to="/pickup-display"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3.5 py-2.5 rounded-2xl bg-primary-dark hover:bg-primary text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+            title="Open Public Counter Pickup Screen in new tab"
+          >
+            <span>📺 Counter TV</span>
+            <ExternalLink className="w-3.5 h-3.5 text-amber" />
+          </Link>
+
           <button
             onClick={fetchActiveOrders}
             className="p-2.5 bg-white hover:bg-gray-50 border border-border text-primary-dark rounded-2xl transition-all shadow-sm"
@@ -636,6 +648,9 @@ const LiveTracking = () => {
                   <div className="flex items-center gap-2">
                     <span className="font-mono font-bold text-amber text-base tracking-wider">
                       #{order.orderCode}
+                    </span>
+                    <span className="bg-amber/20 border border-amber/40 text-amber text-[10px] font-black uppercase px-2 py-0.5 rounded-md">
+                      TOKEN: {order.pickupToken ? (String(order.pickupToken).startsWith('DRS-') ? order.pickupToken : `DRS-${order.pickupToken}`) : order.orderCode}
                     </span>
                     <span className="w-1.5 h-1.5 rounded-full bg-amber animate-ping" />
                   </div>

@@ -13,9 +13,15 @@ import {
 const buildSafeOrderQuery = (rawQuery) => {
   if (!rawQuery) return null;
   const term = String(rawQuery).trim();
+  const withoutPrefix = term.replace(/^DRS-/i, '');
+  const withPrefix = term.toUpperCase().startsWith('DRS-') ? term : `DRS-${term}`;
+
   const conditions = [
     { orderCode: { $regex: new RegExp(`^${term}$`, 'i') } },
+    { orderCode: { $regex: new RegExp(`^${withPrefix}$`, 'i') } },
     { pickupToken: { $regex: new RegExp(`^${term}$`, 'i') } },
+    { pickupToken: { $regex: new RegExp(`^${withPrefix}$`, 'i') } },
+    { pickupToken: { $regex: new RegExp(`^${withoutPrefix}$`, 'i') } },
     { pickupSecret: term },
   ];
   if (mongoose.Types.ObjectId.isValid(term)) {
@@ -88,10 +94,9 @@ export const createWalkInOrder = async (req, res) => {
     const discountAmount = Math.max(0, Math.min(subtotal, Number(discount) || 0));
     const grandTotal = Math.max(0, subtotal - discountAmount);
 
-    // 2. Generate unique order code & human-readable pickup token
+    // 2. Generate unique order code & consistent pickup token
     const orderCode = await generateOrderCode();
-    // Human-friendly token e.g. "1025" from "DRS-1025" or the full code
-    const pickupToken = orderCode.replace('DRS-', '');
+    const pickupToken = orderCode; // Consistent DRS-XXXX format
     const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
 
     // 3. Create WALK_IN Order document
@@ -236,6 +241,14 @@ export const verifyAndHandoverOrder = async (req, res) => {
     const io = req.app.get('socketio');
     if (io) {
       io.to('admin').emit('order:updated', order);
+
+      // Broadcast removal from public counter display
+      io.emit('pickup:readyTokensChanged', {
+        orderId: order._id,
+        orderCode: order.orderCode,
+        pickupToken: order.pickupToken || order.orderCode,
+        status: 'Completed',
+      });
       if (order.user) {
         io.to(`user:${order.user._id || order.user}`).emit('order:statusChanged', {
           orderId: order._id,
@@ -561,3 +574,4 @@ export const cleanupExpiredBills = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+

@@ -117,8 +117,13 @@ const Orders = () => {
               {/* Card Header */}
               <div className="bg-primary-darker/90 px-6 py-4 flex flex-wrap items-center justify-between gap-4 text-white">
                 <div>
-                  <span className="text-[10px] text-white/50 tracking-wider uppercase block">Order Code</span>
-                  <span className="font-mono font-bold text-amber text-lg">{order.orderCode}</span>
+                  <span className="text-[10px] text-white/50 tracking-wider uppercase block">Pickup Token / Order</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-outfit font-black text-amber text-lg">
+                      {order.pickupToken ? (String(order.pickupToken).startsWith('DRS-') ? order.pickupToken : `DRS-${order.pickupToken}`) : order.orderCode}
+                    </span>
+                    <span className="text-xs text-white/50 font-mono">({order.orderCode})</span>
+                  </div>
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] text-white/50 tracking-wider uppercase block">Order Date</span>
@@ -185,21 +190,27 @@ const Orders = () => {
                 </div>
 
                 {/* Actions Button */}
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-2.5">
+                  <Link
+                    to="/pickup"
+                    className="flex-1 min-w-[140px] bg-amber hover:bg-amber-dark text-stone-950 text-xs font-black py-2.5 px-4 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5"
+                  >
+                    <span>🎟️ Pickup Token</span>
+                  </Link>
                   {isOrderActive(order.status) && (
                     <Link
                       to={`/tracker/${order.orderCode}`}
-                      className="flex-1 bg-primary-dark hover:bg-primary text-white text-sm font-bold py-3 px-5 rounded-2xl transition-all shadow-md shadow-primary/20 flex items-center justify-center gap-2"
+                      className="flex-1 min-w-[130px] bg-primary-dark hover:bg-primary text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5"
                     >
-                      <MapPin className="w-4 h-4" />
-                      <span>Track Order</span>
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>Track Status</span>
                     </Link>
                   )}
                   <Link
                     to={`/bill/${order.orderCode}`}
-                    className="flex-1 bg-white border-2 border-border hover:border-primary-dark text-primary-dark hover:text-primary-dark text-sm font-bold py-3 px-5 rounded-2xl transition-all flex items-center justify-center gap-2"
+                    className="flex-1 min-w-[110px] bg-white border border-border hover:border-primary-dark text-primary-dark text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-1.5"
                   >
-                    <Receipt className="w-4 h-4" />
+                    <Receipt className="w-3.5 h-3.5" />
                     <span>View Bill</span>
                   </Link>
                 </div>

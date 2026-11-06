@@ -408,3 +408,4 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
 };
 
 export default ThermalReceiptModal;
+

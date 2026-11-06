@@ -7,6 +7,7 @@ import {
   cancelOrder,
   getAdminOrders,
   getActiveOrders,
+  getPublicReadyTokens,
 } from '../controllers/orderController.js';
 import { protect } from '../middleware/authMiddleware.js';
 import { adminOnly } from '../middleware/adminMiddleware.js';
@@ -20,6 +21,9 @@ router.route('/')
 router.get('/active', protect, adminOnly, getActiveOrders);
 router.get('/my', protect, getMyOrders);
 router.get('/admin/list', protect, adminOnly, getAdminOrders);
+
+// Public route for Counter Live Pickup Display (No login required, safe public fields only)
+router.get('/public/ready-tokens', getPublicReadyTokens);
 
 router.route('/:id')
   .get(protect, getOrderById);

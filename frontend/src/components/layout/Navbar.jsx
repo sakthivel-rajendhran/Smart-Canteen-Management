@@ -17,7 +17,8 @@ import {
   BadgeIndianRupee,
   Receipt,
   Zap,
-  CheckCircle2
+  CheckCircle2,
+  QrCode
 } from 'lucide-react';
 import NotificationBell from '../notifications/NotificationBell';
 
@@ -58,6 +59,7 @@ const Navbar = () => {
       </div>
     ) },
     { label: 'Orders', path: '/orders', icon: <ClipboardList className="w-5 h-5" /> },
+    { label: 'Pickup', path: '/pickup', icon: <QrCode className="w-5 h-5" /> },
     { label: 'Profile', path: '/profile', icon: <User className="w-5 h-5" /> }
   ];
 
@@ -129,6 +131,17 @@ const Navbar = () => {
               }`}
             >
               Track Orders
+            </Link>
+            <Link
+              to="/pickup"
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+                isActive('/pickup')
+                  ? 'text-white bg-white/15'
+                  : 'text-white/85 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <QrCode className="w-4 h-4 text-amber" />
+              <span>Pickup</span>
             </Link>
             <Link
               to="/profile"

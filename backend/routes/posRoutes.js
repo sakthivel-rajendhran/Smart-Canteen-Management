@@ -37,3 +37,4 @@ router.route('/settings/bill-retention')
 router.post('/settings/bill-retention/cleanup', cleanupExpiredBills);
 
 export default router;
+

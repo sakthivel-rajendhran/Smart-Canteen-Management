@@ -10,14 +10,26 @@ import {
   createAndEmitAdminNotification,
 } from '../utils/notificationHelper.js';
 
-// Helper to query orders safely by either orderCode or Mongo _id without CastError
+// Helper to query orders safely by orderCode, pickupToken, or Mongo _id without CastError
 const buildOrderQuery = (rawId) => {
   if (!rawId) return null;
   const id = String(rawId).trim();
+  const withoutPrefix = id.replace(/^DRS-/i, '');
+  const withPrefix = id.toUpperCase().startsWith('DRS-') ? id : `DRS-${id}`;
+
+  const conditions = [
+    { orderCode: { $regex: new RegExp(`^${id}$`, 'i') } },
+    { orderCode: { $regex: new RegExp(`^${withPrefix}$`, 'i') } },
+    { pickupToken: { $regex: new RegExp(`^${id}$`, 'i') } },
+    { pickupToken: { $regex: new RegExp(`^${withPrefix}$`, 'i') } },
+    { pickupToken: { $regex: new RegExp(`^${withoutPrefix}$`, 'i') } },
+  ];
+
   if (mongoose.Types.ObjectId.isValid(id)) {
-    return { $or: [{ _id: id }, { orderCode: { $regex: new RegExp(`^${id}$`, 'i') } }] };
+    conditions.unshift({ _id: id });
   }
-  return { orderCode: { $regex: new RegExp(`^${id}$`, 'i') } };
+
+  return { $or: conditions };
 };
 
 // @desc    Create a new order
@@ -103,7 +115,7 @@ const createOrder = async (req, res) => {
 
     const total = subtotal - discount;
     const orderCode = await generateOrderCode();
-    const pickupToken = orderCode.replace('DRS-', '');
+    const pickupToken = orderCode; // Consistent DRS-XXXX format
     const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
 
     const order = await Order.create({
@@ -332,6 +344,15 @@ const updateOrderStatus = async (req, res) => {
 
       // 3. Notify admin page
       io.to('admin').emit('order:updated', order);
+
+      // 4. Broadcast live ready tokens change to public counter display
+      io.emit('pickup:readyTokensChanged', {
+        orderId: order._id,
+        orderCode: order.orderCode,
+        pickupToken: order.pickupToken || order.orderCode,
+        status: order.status,
+        readyAt: order.updatedAt,
+      });
     }
 
     res.json({ success: true, message: `Order status updated to ${status}`, data: order });
@@ -420,6 +441,14 @@ const cancelOrder = async (req, res) => {
         orderCode: order.orderCode,
         status: 'Cancelled',
         paymentStatus: order.paymentStatus
+      });
+
+      // Broadcast update to counter display in case a ready order was cancelled
+      io.emit('pickup:readyTokensChanged', {
+        orderId: order._id,
+        orderCode: order.orderCode,
+        pickupToken: order.pickupToken || order.orderCode,
+        status: 'Cancelled',
       });
       io.to('admin').emit('order:updated', order);
     }
@@ -521,6 +550,41 @@ const getActiveOrders = async (req, res) => {
   }
 };
 
+// @desc    Get all active READY orders for public counter display
+// @route   GET /api/orders/public/ready-tokens
+// @access  Public (No credentials required, strictly zero PII)
+const getPublicReadyTokens = async (req, res) => {
+  try {
+    const readyOrders = await Order.find({ status: 'Ready' })
+      .select('orderCode pickupToken orderType updatedAt createdAt')
+      .sort({ updatedAt: 1 }) // Oldest ready order first
+      .lean();
+
+    const data = readyOrders.map((o) => {
+      const rawToken = o.pickupToken || o.orderCode;
+      const formattedToken = String(rawToken).toUpperCase().startsWith('DRS-')
+        ? String(rawToken).toUpperCase()
+        : `DRS-${rawToken}`;
+
+      return {
+        orderCode: o.orderCode,
+        pickupToken: formattedToken,
+        orderType: o.orderType || 'ONLINE',
+        readyAt: o.updatedAt || o.createdAt,
+      };
+    });
+
+    res.json({
+      success: true,
+      count: data.length,
+      data,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 export {
   createOrder,
   getMyOrders,
@@ -529,4 +593,5 @@ export {
   cancelOrder,
   getAdminOrders,
   getActiveOrders,
+  getPublicReadyTokens,
 };
