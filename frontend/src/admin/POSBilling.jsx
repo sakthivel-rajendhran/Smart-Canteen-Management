@@ -18,7 +18,6 @@ import {
   X,
   Receipt,
   RotateCcw,
-  ArrowRight,
 } from 'lucide-react';
 
 const POSBilling = () => {
@@ -36,6 +35,7 @@ const POSBilling = () => {
   const [cart, setCart] = useState([]);
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'upi'
+  const [cashGiven, setCashGiven] = useState('');
 
   // Submission & Receipt Modal State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -171,6 +171,7 @@ const POSBilling = () => {
   const clearCart = () => {
     setCart([]);
     setDiscount(0);
+    setCashGiven('');
     setPaymentMethod('cash');
   };
 
@@ -192,12 +193,14 @@ const POSBilling = () => {
     return cart.reduce((sum, item) => sum + item.quantity, 0);
   }, [cart]);
 
-  // Handle Checkout & Print
+  // Handle Checkout: Confirm Payment & Generate Physical Thermal Bill
   const handleCompleteSale = async () => {
     if (cart.length === 0) {
       showToast('Billing cart is empty! Add food items to proceed.', 'error');
       return;
     }
+
+    if (isSubmitting) return; // Prevent duplicate clicks
 
     try {
       setIsSubmitting(true);
@@ -210,7 +213,7 @@ const POSBilling = () => {
           quantity: i.quantity,
         })),
         paymentMethod,
-        paymentStatus: 'paid', // Counter POS sales are collected immediately
+        paymentStatus: 'paid', // Counter POS sales are strictly collected before completing
         walkInCustomer: {
           name: 'Walk-in Customer',
           phone: '',
@@ -225,6 +228,7 @@ const POSBilling = () => {
       if (response.data?.success) {
         const order = response.data.data;
         setLastCreatedOrder(order);
+        // Open receipt modal for preview. autoPrint is set to false so browser print dialog only opens when clicked
         setReceiptModalOpen(true);
         clearCart();
         showToast(
@@ -273,12 +277,12 @@ const POSBilling = () => {
         </div>
       )}
 
-      {/* Thermal Receipt Modal (for instant print & reprint) */}
+      {/* Thermal Receipt Modal (strictly manual print upon explicit click, autoPrint disabled) */}
       <ThermalReceiptModal
         order={lastCreatedOrder}
         isOpen={receiptModalOpen}
         onClose={() => setReceiptModalOpen(false)}
-        autoPrint={true}
+        autoPrint={false}
       />
 
       {/* ================= TOP POS ACTION & STATUS BAR ================= */}
@@ -295,41 +299,34 @@ const POSBilling = () => {
                   POS Counter Billing
                 </h1>
                 <span className="bg-amber/20 border border-amber/40 text-amber text-[10px] font-black uppercase px-2 py-0.5 rounded-full">
-                  Fast Sales
+                  Direct Billing
                 </span>
               </div>
               <p className="text-[10px] text-white/70 mt-0.5">
-                Quick counter checkout • Instant thermal bill generation
+                Select Food → Confirm Payment → Print Physical Thermal Bill → Completed
               </p>
             </div>
           </div>
 
-          {/* Quick links & Last Order Callout */}
+          {/* Quick links & Last Order Callout for safe reprinting */}
           <div className="flex items-center gap-2">
             {lastCreatedOrder && (
-              <div className="hidden sm:flex items-center gap-2 bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1.5 rounded-xl text-xs font-semibold">
+              <div className="flex items-center gap-2 bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1.5 rounded-xl text-xs font-semibold">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 <span>
-                  Last Token: <strong className="text-amber">#{lastCreatedOrder.pickupToken}</strong> (₹{lastCreatedOrder.total})
+                  Last Bill: <strong className="text-amber">#{lastCreatedOrder.pickupToken || lastCreatedOrder.orderCode}</strong> (₹{lastCreatedOrder.total})
                 </span>
                 <button
                   type="button"
                   onClick={() => setReceiptModalOpen(true)}
-                  className="ml-1 text-[10px] bg-amber text-stone-950 font-bold px-2 py-0.5 rounded hover:bg-amber-light transition"
-                  title="Reprint last receipt"
+                  className="ml-1 text-[10px] bg-amber text-stone-950 font-bold px-2.5 py-0.5 rounded hover:bg-amber-light transition shadow-2xs flex items-center gap-1 active:scale-95"
+                  title="Reprint last bill without creating duplicate"
                 >
-                  Reprint
+                  <Printer className="w-3 h-3" />
+                  <span>Reprint Bill</span>
                 </button>
               </div>
             )}
-
-            <Link
-              to="/admin/handover"
-              className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3 py-1.5 rounded-xl transition border border-white/10"
-            >
-              <span>Handover Queue</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
 
             <Link
               to="/admin/bills"
@@ -659,10 +656,10 @@ const POSBilling = () => {
             {/* Cart Footer Controls (Shrink-0) */}
             <div className="shrink-0 pt-2.5 border-t border-stone-200 space-y-2.5">
               
-              {/* Payment Mode (Cash vs UPI QR) */}
+              {/* Payment Mode Selection (Cash vs UPI QR) */}
               <div className="space-y-1.5">
                 <span className="text-[10px] font-black uppercase tracking-wider text-stone-500 block">
-                  Payment Method
+                  Select Payment Method
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -693,35 +690,100 @@ const POSBilling = () => {
                 </div>
               </div>
 
+              {/* Cash Given & Change Helper (Visible when Cash selected) */}
+              {paymentMethod === 'cash' && grandTotal > 0 && (
+                <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-2.5 space-y-1.5 animate-in fade-in text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-stone-700">Cash Received from Customer:</span>
+                    <div className="relative w-28">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-stone-500">₹</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={cashGiven}
+                        onChange={(e) => setCashGiven(e.target.value)}
+                        placeholder={grandTotal.toFixed(0)}
+                        className="w-full pl-6 pr-2 py-1 bg-white border border-stone-300 rounded-lg text-right font-mono font-bold text-xs focus:outline-none focus:border-[#0b3d2e]"
+                      />
+                    </div>
+                  </div>
+
+                  {Number(cashGiven) > 0 && Number(cashGiven) >= grandTotal && (
+                    <div className="bg-emerald-100/80 border border-emerald-300 text-emerald-900 rounded-xl px-2.5 py-1.5 flex items-center justify-between font-bold">
+                      <span>Change to Return:</span>
+                      <span className="font-mono text-sm font-black text-emerald-950">
+                        ₹{(Number(cashGiven) - grandTotal).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+
+                  {Number(cashGiven) > 0 && Number(cashGiven) < grandTotal && (
+                    <div className="bg-rose-100/80 border border-rose-300 text-rose-800 rounded-xl px-2.5 py-1 flex items-center justify-between text-[11px] font-bold">
+                      <span>Short by:</span>
+                      <span className="font-mono">
+                        ₹{(grandTotal - Number(cashGiven)).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Quick Cash Suggestions */}
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <span className="text-[10px] text-stone-500 font-bold">Quick:</span>
+                    <button
+                      type="button"
+                      onClick={() => setCashGiven(String(grandTotal))}
+                      className="px-2 py-0.5 bg-white border border-stone-200 hover:border-amber-500 rounded text-[10px] font-mono font-bold text-stone-700 transition"
+                    >
+                      ₹{grandTotal.toFixed(0)} (Exact)
+                    </button>
+                    {[50, 100, 200, 500].filter((val) => val > grandTotal).map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setCashGiven(String(val))}
+                        className="px-2 py-0.5 bg-white border border-stone-200 hover:border-amber-500 rounded text-[10px] font-mono font-bold text-stone-700 transition"
+                      >
+                        ₹{val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* UPI QR Display Interface (Visible when UPI selected) */}
               {paymentMethod === 'upi' && (
-                <div className="bg-emerald-50/90 border border-emerald-300 rounded-2xl p-2.5 flex items-center gap-3 animate-in fade-in">
-                  <div className="w-16 h-16 bg-white p-1 rounded-xl border border-emerald-200 shadow-xs flex items-center justify-center shrink-0">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(
-                        `upi://pay?pa=drsquickserve@canteen&pn=DRS%20Quick%20Serve&am=${grandTotal.toFixed(
-                          2
-                        )}&cu=INR`
-                      )}`}
-                      alt="UPI QR Code"
-                      className="w-full h-full object-contain"
-                    />
+                <div className="bg-emerald-50/90 border border-emerald-300 rounded-2xl p-2.5 space-y-2 animate-in fade-in">
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 bg-white p-1 rounded-xl border border-emerald-200 shadow-xs flex items-center justify-center shrink-0">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(
+                          `upi://pay?pa=drsquickserve@canteen&pn=DRS%20Quick%20Serve&am=${grandTotal.toFixed(
+                            2
+                          )}&cu=INR`
+                        )}`}
+                        alt="UPI QR Code"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0 text-left">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] font-black uppercase text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">
+                          Scan & Pay
+                        </span>
+                        <span className="text-xs font-outfit font-black text-emerald-950">
+                          ₹{grandTotal.toFixed(2)}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-stone-600 font-medium mt-0.5 truncate">
+                        GPay • PhonePe • Paytm • BHIM
+                      </p>
+                      <div className="text-[9px] font-mono text-stone-500 mt-0.5">
+                        UPI: <strong>drsquickserve@canteen</strong>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0 text-left">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] font-black uppercase text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">
-                        Scan & Pay
-                      </span>
-                      <span className="text-xs font-outfit font-black text-emerald-950">
-                        ₹{grandTotal.toFixed(2)}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-stone-600 font-medium mt-0.5 truncate">
-                      GPay • PhonePe • Paytm • BHIM
-                    </p>
-                    <div className="text-[9px] font-mono text-stone-500 mt-0.5">
-                      UPI: <strong>drsquickserve@canteen</strong>
-                    </div>
+                  <div className="text-[10px] text-emerald-800 bg-emerald-100/60 rounded-lg p-1.5 text-center font-semibold">
+                    Customer scans QR & pays • Verify confirmation on counter soundbox / phone
                   </div>
                 </div>
               )}
@@ -762,22 +824,25 @@ const POSBilling = () => {
                 </div>
               </div>
 
-              {/* Primary Action Button: Complete Sale & Print Bill */}
+              {/* Primary Action Button: Confirm Payment & Print Thermal Bill */}
               <button
                 type="button"
                 disabled={cart.length === 0 || isSubmitting}
                 onClick={handleCompleteSale}
-                className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-stone-950 font-black text-sm py-3 px-4 rounded-2xl shadow-lg shadow-amber-500/25 active:scale-[0.98] transition-all"
+                className="w-full flex items-center justify-center gap-2 bg-[#0b3d2e] hover:bg-[#1a7a45] disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-lg active:scale-[0.98] transition-all"
               >
                 {isSubmitting ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-stone-950 border-t-transparent rounded-full animate-spin" />
-                    <span>Processing Sale...</span>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Confirming Payment & Generating Bill...</span>
                   </>
                 ) : (
                   <>
-                    <Printer className="w-4.5 h-4.5" />
-                    <span>Complete Sale & Print Bill (₹{grandTotal.toFixed(2)})</span>
+                    <Printer className="w-4.5 h-4.5 text-amber" />
+                    <span>
+                      {paymentMethod === 'cash' ? 'Confirm Cash & Print Bill' : 'Confirm UPI & Print Bill'}{' '}
+                      (₹{grandTotal.toFixed(2)})
+                    </span>
                   </>
                 )}
               </button>

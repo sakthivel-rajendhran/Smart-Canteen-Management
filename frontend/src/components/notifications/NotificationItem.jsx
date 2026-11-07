@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, Trash2, ArrowUpRight, Clock, AlertCircle } from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useAuth } from '../../context/AuthContext';
 
 const formatTimeAgo = (dateStr) => {
   if (!dateStr) return 'Just now';
@@ -20,20 +21,40 @@ const formatTimeAgo = (dateStr) => {
 const NotificationItem = ({ notification, onCloseDropdown }) => {
   const navigate = useNavigate();
   const { markAsRead, deleteNotification } = useNotifications();
+  const { user } = useAuth();
 
   const isUnread = !notification.read;
   const isHighPriority = notification.priority === 'HIGH';
   const orderCode = notification.metadata?.orderCode || notification.order?.orderCode;
   const pickupToken = notification.metadata?.pickupToken || orderCode;
-  const targetLink = notification.metadata?.link || (orderCode ? `/tracker/${orderCode}` : '/pickup');
+
+  const isAdmin = user?.role === 'admin' || window.location.pathname.startsWith('/admin');
 
   const handleClick = () => {
     if (isUnread) {
       markAsRead(notification._id);
     }
-    if (targetLink) {
-      if (onCloseDropdown) onCloseDropdown();
-      navigate(targetLink);
+    if (onCloseDropdown) onCloseDropdown();
+
+    if (isAdmin) {
+      // Admin notification click:
+      // Do NOT redirect admin to food tracking (/tracker/:code), Live Queue, or Handover
+      const adminLink = notification.metadata?.link;
+      if (
+        adminLink &&
+        !adminLink.includes('tracker') &&
+        !adminLink.includes('live-tracking') &&
+        !adminLink.includes('handover')
+      ) {
+        navigate(adminLink);
+      }
+      // If no appropriate admin link, simply mark as read without navigating
+    } else {
+      // Student / Customer notification click: navigate to their order tracking page
+      const customerLink = notification.metadata?.link || (orderCode ? `/tracker/${orderCode}` : '/pickup');
+      if (customerLink) {
+        navigate(customerLink);
+      }
     }
   };
 

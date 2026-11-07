@@ -2,10 +2,14 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, ArrowRight, ExternalLink } from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useAuth } from '../../context/AuthContext';
 
 const NotificationToast = () => {
   const { toasts, dismissToast } = useNotifications();
+  const { user } = useAuth();
   const navigate = useNavigate();
+
+  const isAdmin = user?.role === 'admin' || window.location.pathname.startsWith('/admin');
 
   if (!toasts || toasts.length === 0) return null;
 
@@ -19,7 +23,8 @@ const NotificationToast = () => {
 
         const handleAction = () => {
           dismissToast(toast.id);
-          if (toast.orderCode) {
+          // For admin: do not redirect to tracker
+          if (!isAdmin && toast.orderCode) {
             navigate(`/tracker/${toast.orderCode}`);
           }
         };

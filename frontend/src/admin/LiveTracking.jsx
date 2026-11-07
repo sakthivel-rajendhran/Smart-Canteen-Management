@@ -80,6 +80,8 @@ const LiveTracking = () => {
     const handleCreated = (newOrder) => {
       console.log('Incoming live order event:', newOrder?.orderCode);
       if (!newOrder || !newOrder._id) return;
+      // Only active online orders belong in the Kitchen Live Queue
+      if (newOrder.orderType === 'WALK_IN' || newOrder.status === 'Completed') return;
 
       setOrders((prev) => {
         if (prev.some((o) => o._id === newOrder._id || o.orderCode === newOrder.orderCode)) {

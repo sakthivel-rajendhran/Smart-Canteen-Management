@@ -529,9 +529,10 @@ const getActiveOrders = async (req, res) => {
   try {
     const { status, search, paymentMethod } = req.query;
 
-    // Default: only active order stages
+    // Default: only active order stages for online orders (walk-in counter orders are completed directly at POS)
     let query = {
       status: { $in: ['Placed', 'Confirmed', 'Preparing', 'Ready'] },
+      orderType: { $ne: 'WALK_IN' },
     };
 
     if (status && status !== 'all' && status !== 'active') {

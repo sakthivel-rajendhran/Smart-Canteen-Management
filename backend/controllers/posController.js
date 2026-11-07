@@ -100,7 +100,8 @@ export const createWalkInOrder = async (req, res) => {
     const pickupToken = orderCode; // Consistent DRS-XXXX format
     const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
 
-    // 3. Create WALK_IN Order document
+    // 3. Create WALK_IN Order document directly in Completed state (counter sale finalized at POS)
+    const now = new Date();
     const order = await Order.create({
       orderCode,
       orderType: 'WALK_IN',
@@ -119,36 +120,41 @@ export const createWalkInOrder = async (req, res) => {
       discount: discountAmount,
       total: grandTotal,
       paymentMethod,
-      paymentStatus: paymentStatus || 'paid',
-      status: 'Placed',
+      paymentStatus: 'paid', // Counter POS sales are collected immediately
+      status: 'Completed',
+      completedAt: now,
+      handoverVerified: true,
+      handoverVerifiedAt: now,
+      handoverVerifiedBy: req.user._id,
     });
 
-    // 4. Real-time broadcast to kitchen and admin boards
+    // 4. Real-time broadcast for POS / sales reports (without feeding kitchen Live Queue)
     const io = req.app.get('socketio');
     if (io) {
-      io.to('admin').emit('order:created', order);
+      io.to('admin').emit('pos:sale:completed', order);
 
       // Create idempotent admin notification for walk-in sale
       createAndEmitAdminNotification(io, {
-        title: '🔔 New Walk-in Order',
-        message: `Walk-in Order #${order.orderCode} (Token: #${order.pickupToken}) placed at counter (₹${order.total}).`,
-        icon: '💵',
-        priority: 'HIGH',
+        title: '💵 Direct POS Sale Completed',
+        message: `Walk-in Bill #${order.orderCode} (Token: #${order.pickupToken}) paid & completed at counter (₹${order.total}).`,
+        icon: '🧾',
+        priority: 'NORMAL',
         orderId: order._id,
         orderCode: order.orderCode,
-        eventId: `ORDER_ADMIN_${order.orderCode}_PLACED`,
+        eventId: `ORDER_ADMIN_${order.orderCode}_COMPLETED`,
         metadata: {
           orderCode: order.orderCode,
           pickupToken: order.pickupToken,
           total: order.total,
           customerName: order.walkInCustomer.name,
+          link: '/admin/bills',
         },
       });
     }
 
     res.status(201).json({
       success: true,
-      message: 'Walk-in order created successfully',
+      message: 'Walk-in POS transaction completed successfully',
       data: order,
     });
   } catch (error) {
@@ -167,12 +173,15 @@ export const getHandoverOrders = async (req, res) => {
 
     if (filter === 'completed') {
       query.status = { $in: ['Handover Bill', 'Completed'] };
+      query.orderType = { $ne: 'WALK_IN' };
     } else if (filter === 'all') {
       query.status = { $in: ['Ready', 'Pickup Bill', 'Handover Bill', 'Completed'] };
+      query.orderType = { $ne: 'WALK_IN' };
     } else {
-      // Pending handovers: orders waiting for final collection & bill print ('Pickup Bill' or 'Ready')
+      // Pending handovers: online orders waiting for final collection & bill print ('Pickup Bill' or 'Ready')
       query.status = { $in: ['Pickup Bill', 'Ready'] };
       query.handoverVerified = { $ne: true };
+      query.orderType = { $ne: 'WALK_IN' };
     }
 
     if (search && search.trim()) {
