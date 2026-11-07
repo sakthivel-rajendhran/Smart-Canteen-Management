@@ -32,22 +32,24 @@ const NotificationBell = ({ isAdmin = false }) => {
       {/* Bell Trigger Button */}
       <button
         onClick={() => setIsOpen((prev) => !prev)}
-        className={`relative p-2 rounded-full transition-all flex items-center justify-center ${
+        className={`relative rounded-full transition-all flex items-center justify-center select-none ${
+          isAdmin ? 'h-9 w-9' : 'p-2'
+        } ${
           isOpen
-            ? 'bg-amber text-primary-darker shadow-md'
+            ? 'bg-amber text-primary-darker shadow-sm shadow-amber/20'
             : isAdmin
-            ? 'text-white/80 hover:bg-white/10 hover:text-white'
+            ? 'text-white/85 hover:bg-white/10 hover:text-white bg-transparent'
             : 'text-white/85 hover:bg-white/10 hover:text-white'
         }`}
         title="Notifications"
         aria-label="Notifications"
         aria-expanded={isOpen}
       >
-        <Bell className="w-5 h-5 transition-transform duration-200 group-hover:scale-110" />
+        <Bell className={`${isAdmin ? 'w-4 h-4' : 'w-5 h-5'} transition-transform duration-200 group-hover:scale-110`} />
 
-        {/* Unread Count Badge (Section 13: Hidden when unreadCount is 0) */}
+        {/* Unread Count Badge (Hidden when unreadCount is 0) */}
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white font-outfit font-black text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center border-2 border-primary-darker shadow-md animate-in zoom-in-75 duration-150">
+          <span className="absolute -top-1 -right-1 bg-red-500 text-white font-outfit font-black text-[9px] min-w-[16px] h-[16px] px-1 rounded-full flex items-center justify-center border-2 border-primary-darker shadow-md animate-in zoom-in-75 duration-150">
             {badgeLabel}
           </span>
         )}

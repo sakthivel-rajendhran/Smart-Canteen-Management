@@ -147,17 +147,20 @@ const Navbar = () => {
 
   const renderNavLinks = () => {
     if (user?.role === 'admin') {
+      const getAdminItemClass = (active) =>
+        `h-9 min-w-[88px] xl:min-w-[96px] px-2.5 xl:px-3.5 rounded-full text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-all select-none whitespace-nowrap text-center ${
+          active
+            ? 'bg-amber text-primary-darker font-black shadow-sm shadow-amber/20'
+            : 'text-white/85 hover:bg-white/10 hover:text-white bg-transparent'
+        }`;
+
       return (
         <>
           {adminPrimaryNavItems.map((item) => (
             <Link
               key={item.path}
               to={item.path}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                isActive(item.path)
-                  ? 'bg-amber text-primary-darker shadow-md'
-                  : 'text-white/80 hover:bg-white/10 hover:text-white'
-              }`}
+              className={getAdminItemClass(isActive(item.path))}
             >
               {item.icon}
               <span>{item.label}</span>
@@ -174,10 +177,10 @@ const Navbar = () => {
             <button
               type="button"
               onClick={handleToggleDropdown}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all select-none cursor-pointer ${
+              className={`h-9 min-w-[108px] xl:min-w-[116px] px-2.5 xl:px-3 rounded-full text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-all select-none cursor-pointer whitespace-nowrap text-center ${
                 isMenuControlActive
-                  ? 'bg-amber text-primary-darker shadow-md font-bold'
-                  : 'text-white/80 hover:bg-white/10 hover:text-white'
+                  ? 'bg-amber text-primary-darker font-black shadow-sm shadow-amber/20'
+                  : 'text-white/85 hover:bg-white/10 hover:text-white bg-transparent'
               }`}
               aria-expanded={dropdownOpen}
               aria-haspopup="true"
@@ -231,23 +234,19 @@ const Navbar = () => {
             <Link
               key={item.path}
               to={item.path}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                isActive(item.path)
-                  ? 'bg-amber text-primary-darker shadow-md'
-                  : 'text-white/80 hover:bg-white/10 hover:text-white'
-              }`}
+              className={getAdminItemClass(isActive(item.path))}
             >
               {item.icon}
               <span>{item.label}</span>
             </Link>
           ))}
 
-          <div className="ml-1">
-            <NotificationBell isAdmin={true} />
-          </div>
+          <NotificationBell isAdmin={true} />
+
           <button
             onClick={handleLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white/50 hover:bg-red-950/20 hover:text-red-400 transition-all ml-1"
+            className="h-9 min-w-[80px] xl:min-w-[88px] px-2.5 xl:px-3 rounded-full text-xs font-bold inline-flex items-center justify-center gap-1.5 text-white/75 hover:bg-red-500/20 hover:text-red-300 transition-all select-none whitespace-nowrap text-center"
+            title="Logout"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>Logout</span>
@@ -345,12 +344,12 @@ const Navbar = () => {
         </Link>
 
         {/* Desktop Links (Hidden on mobile) */}
-        <div className="hidden md:flex items-center gap-2">
+        <div className={`hidden ${user?.role === 'admin' ? 'lg:flex' : 'md:flex'} items-center gap-1 xl:gap-1.5`}>
           {renderNavLinks()}
         </div>
 
         {/* Mobile Header Menu Button (Hidden on desktop) */}
-        <div className="md:hidden flex items-center gap-3">
+        <div className={`${user?.role === 'admin' ? 'lg:hidden' : 'md:hidden'} flex items-center gap-3`}>
           {user && (
             <NotificationBell isAdmin={user.role === 'admin'} />
           )}
@@ -386,7 +385,7 @@ const Navbar = () => {
 
       {/* Admin Mobile Menu Drawer */}
       {mobileMenuOpen && (user?.role === 'admin' || user?.role === 'ADMIN') && (
-        <div className="md:hidden fixed inset-0 z-40 bg-primary-darker/95 backdrop-blur-md pt-20 px-6 flex flex-col gap-2.5 overflow-y-auto pb-10">
+        <div className="lg:hidden fixed inset-0 z-40 bg-primary-darker/95 backdrop-blur-md pt-20 px-6 flex flex-col gap-2.5 overflow-y-auto pb-10">
           {adminPrimaryNavItems.map((item) => (
             <Link
               key={item.path}
