@@ -302,13 +302,6 @@ const FoodHandover = () => {
             </Link>
 
             <Link
-              to="/admin/live-tracking"
-              className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3 py-2 rounded-xl transition border border-white/10"
-            >
-              <span>Kitchen Queue</span>
-            </Link>
-
-            <Link
               to="/admin/bills"
               className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3 py-2 rounded-xl transition border border-white/10"
             >
