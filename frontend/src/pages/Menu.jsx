@@ -225,6 +225,13 @@ const Menu = () => {
   const cartTotal = cart.reduce((acc, item) => acc + item.price * item.quantity, 0);
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
+  const getCategoryTabClass = (isSelected) =>
+    `h-9 min-w-[96px] sm:min-w-[104px] px-4 rounded-full border text-xs inline-flex items-center justify-center whitespace-nowrap text-center shrink-0 transition-all select-none cursor-pointer ${
+      isSelected
+        ? 'bg-amber text-primary-darker border-amber font-black shadow-sm shadow-amber/20 hover:bg-amber'
+        : 'bg-cream text-primary-dark border-border font-bold hover:bg-primary-light/60 hover:border-primary/25'
+    }`;
+
   return (
     <div className="bg-cream min-h-screen">
       {/* Hero Header Banner */}
@@ -247,18 +254,14 @@ const Menu = () => {
       </div>
 
       {/* Sticky Categories & Quick Filters Bar */}
-      <div className="bg-white/95 backdrop-blur-md border-b border-border sticky top-16 z-30 px-[5%] shadow-sm">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 py-3">
+      <div className="bg-white/95 backdrop-blur-md border-b border-border sticky top-16 z-30 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
           {/* Categories Tab Scroll */}
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5 flex-1 min-w-0">
             <button
               type="button"
               onClick={() => setActiveCategory('all')}
-              className={`h-9 px-4.5 rounded-full text-xs font-bold whitespace-nowrap transition-all inline-flex items-center justify-center cursor-pointer ${
-                activeCategory === 'all'
-                  ? 'bg-primary-dark text-white shadow-md'
-                  : 'bg-cream text-muted hover:bg-gray-100 hover:text-primary-dark'
-              }`}
+              className={getCategoryTabClass(activeCategory === 'all')}
             >
               All Categories
             </button>
@@ -267,11 +270,7 @@ const Menu = () => {
                 key={cat._id}
                 type="button"
                 onClick={() => setActiveCategory(cat._id)}
-                className={`h-9 px-4.5 rounded-full text-xs font-bold whitespace-nowrap transition-all inline-flex items-center justify-center cursor-pointer ${
-                  activeCategory === cat._id
-                    ? 'bg-primary-dark text-white shadow-md'
-                    : 'bg-cream text-muted hover:bg-gray-100 hover:text-primary-dark'
-                }`}
+                className={getCategoryTabClass(activeCategory === cat._id)}
               >
                 {cat.name}
               </button>
@@ -279,10 +278,11 @@ const Menu = () => {
           </div>
 
           {/* Quick Filter Toggles */}
-          <div className="hidden md:flex items-center gap-2 flex-shrink-0">
+          <div className="hidden md:flex items-center gap-2 shrink-0">
             <button
+              type="button"
               onClick={() => setOnlyFeatured((prev) => !prev)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 border ${
+              className={`h-9 px-3.5 rounded-xl text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 border whitespace-nowrap cursor-pointer ${
                 onlyFeatured
                   ? 'bg-amber text-primary-darker border-amber shadow-sm'
                   : 'bg-white text-muted border-border hover:border-gray-300'
@@ -291,8 +291,9 @@ const Menu = () => {
               <Sparkles className="w-3.5 h-3.5" /> Featured
             </button>
             <button
+              type="button"
               onClick={() => setOnlyAvailable((prev) => !prev)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 border ${
+              className={`h-9 px-3.5 rounded-xl text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 border whitespace-nowrap cursor-pointer ${
                 onlyAvailable
                   ? 'bg-green-600 text-white border-green-600 shadow-sm'
                   : 'bg-white text-muted border-border hover:border-gray-300'
