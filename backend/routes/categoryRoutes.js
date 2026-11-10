@@ -16,6 +16,7 @@ router.route('/')
 
 router.route('/:id')
   .put(protect, adminOnly, updateCategory)
+  .patch(protect, adminOnly, updateCategory)
   .delete(protect, adminOnly, deleteCategory);
 
 export default router;

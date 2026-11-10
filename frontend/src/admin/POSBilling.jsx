@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../services/api';
+import { useSocket } from '../context/SocketContext';
+import CategoryIcon from '../components/common/CategoryIcon';
 import ThermalReceiptModal from '../components/common/ThermalReceiptModal';
 import {
   Search,
@@ -21,6 +23,7 @@ import {
 } from 'lucide-react';
 
 const POSBilling = () => {
+  const { socket } = useSocket();
   const [menuItems, setMenuItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +53,68 @@ const POSBilling = () => {
     fetchInitialData();
   }, []);
 
+  // Real-time synchronization for category updates/renames
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCategoryCreated = (newCat) => {
+      if (newCat.active === false) return;
+      setCategories((prev) =>
+        prev.some((c) => c._id === newCat._id)
+          ? prev
+          : [...prev, newCat].sort((a, b) => a.name.localeCompare(b.name))
+      );
+    };
+
+    const handleCategoryUpdated = (updatedCat) => {
+      setCategories((prev) => {
+        if (updatedCat.active === false) {
+          return prev.filter((c) => c._id !== updatedCat._id);
+        }
+        const exists = prev.some((c) => c._id === updatedCat._id);
+        const updated = exists
+          ? prev.map((c) => (c._id === updatedCat._id ? updatedCat : c))
+          : [...prev, updatedCat];
+        return updated.sort((a, b) => a.name.localeCompare(b.name));
+      });
+
+      if (updatedCat.active === false) {
+        setSelectedCategory((prev) => (prev === updatedCat._id ? 'ALL' : prev));
+      }
+
+      setMenuItems((prev) =>
+        prev.map((item) =>
+          item.category?._id === updatedCat._id
+            ? {
+                ...item,
+                category: {
+                  ...item.category,
+                  name: updatedCat.name,
+                  active: updatedCat.active,
+                  icon: updatedCat.icon,
+                },
+              }
+            : item
+        )
+      );
+    };
+
+    const handleCategoryDeleted = ({ id }) => {
+      setCategories((prev) => prev.filter((c) => c._id !== id));
+      setSelectedCategory((prev) => (prev === id ? 'ALL' : prev));
+    };
+
+    socket.on('category:created', handleCategoryCreated);
+    socket.on('category:updated', handleCategoryUpdated);
+    socket.on('category:deleted', handleCategoryDeleted);
+
+    return () => {
+      socket.off('category:created', handleCategoryCreated);
+      socket.off('category:updated', handleCategoryUpdated);
+      socket.off('category:deleted', handleCategoryDeleted);
+    };
+  }, [socket]);
+
   // Keyboard shortcut listener ('/' focuses search)
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -67,7 +132,7 @@ const POSBilling = () => {
       setLoading(true);
       setError('');
       const [menuRes, catRes] = await Promise.all([
-        API.get('/menu'),
+        API.get('/menu?activeCategoriesOnly=true'),
         API.get('/categories').catch(() => ({ data: { data: [] } })),
       ]);
 
@@ -92,9 +157,14 @@ const POSBilling = () => {
     }, 4000);
   };
 
+  // Exclude items in inactive categories
+  const activeMenuItems = useMemo(() => {
+    return menuItems.filter((item) => item.category && item.category.active !== false);
+  }, [menuItems]);
+
   // Filtered Menu Items
   const filteredItems = useMemo(() => {
-    return menuItems.filter((item) => {
+    return activeMenuItems.filter((item) => {
       // Category filter
       if (selectedCategory !== 'ALL') {
         const catId = typeof item.category === 'object' ? item.category?._id : item.category;
@@ -119,7 +189,7 @@ const POSBilling = () => {
 
       return true;
     });
-  }, [menuItems, selectedCategory, vegOnly, searchQuery]);
+  }, [activeMenuItems, selectedCategory, vegOnly, searchQuery]);
 
   // Cart operations
   const addToCart = (item) => {
@@ -412,20 +482,21 @@ const POSBilling = () => {
                     : 'bg-white text-stone-600 hover:bg-stone-50 border border-stone-200'
                 }`}
               >
-                All Items ({menuItems.length})
+                All Items ({activeMenuItems.length})
               </button>
               {categories.map((cat) => (
                 <button
                   key={cat._id}
                   type="button"
                   onClick={() => setSelectedCategory(cat._id)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all inline-flex items-center gap-1.5 ${
                     selectedCategory === cat._id
                       ? 'bg-[#0b3d2e] text-white shadow-xs'
                       : 'bg-white text-stone-600 hover:bg-stone-50 border border-stone-200'
                   }`}
                 >
-                  {cat.name}
+                  <CategoryIcon category={cat} className="w-3.5 h-3.5 shrink-0" />
+                  <span>{cat.name}</span>
                 </button>
               ))}
             </div>

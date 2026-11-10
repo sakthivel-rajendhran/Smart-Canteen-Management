@@ -1,5 +1,8 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import API from '../services/api';
+import MenuCacheService from '../services/menuCache';
+import { useSocket } from '../context/SocketContext';
+import CategoryIcon from '../components/common/CategoryIcon';
 import {
   Utensils,
   Plus,
@@ -22,11 +25,18 @@ import {
 } from 'lucide-react';
 
 const MenuManagement = () => {
+  const { socket } = useSocket();
   const [menuItems, setMenuItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Active Categories only (used when adding new food items)
+  const activeCategories = useMemo(
+    () => categories.filter((c) => c.active !== false),
+    [categories]
+  );
 
   // Active View Tab: 'table' or 'gallery'
   const [activeTab, setActiveTab] = useState('table');
@@ -67,13 +77,63 @@ const MenuManagement = () => {
     fetchData();
   }, []);
 
+  // Synchronize category updates/renames in real time
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCategoryCreated = (newCat) => {
+      setCategories((prev) =>
+        prev.some((c) => c._id === newCat._id)
+          ? prev
+          : [...prev, newCat].sort((a, b) => a.name.localeCompare(b.name))
+      );
+    };
+
+    const handleCategoryUpdated = (updatedCat) => {
+      setCategories((prev) =>
+        prev
+          .map((c) => (c._id === updatedCat._id ? updatedCat : c))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setMenuItems((prev) =>
+        prev.map((item) =>
+          item.category?._id === updatedCat._id
+            ? {
+                ...item,
+                category: {
+                  ...item.category,
+                  name: updatedCat.name,
+                  active: updatedCat.active,
+                  icon: updatedCat.icon,
+                },
+              }
+            : item
+        )
+      );
+    };
+
+    const handleCategoryDeleted = ({ id }) => {
+      setCategories((prev) => prev.filter((c) => c._id !== id));
+    };
+
+    socket.on('category:created', handleCategoryCreated);
+    socket.on('category:updated', handleCategoryUpdated);
+    socket.on('category:deleted', handleCategoryDeleted);
+
+    return () => {
+      socket.off('category:created', handleCategoryCreated);
+      socket.off('category:updated', handleCategoryUpdated);
+      socket.off('category:deleted', handleCategoryDeleted);
+    };
+  }, [socket]);
+
   const fetchData = async () => {
     try {
       setLoading(true);
       setError('');
       const [menuRes, catRes] = await Promise.all([
         API.get('/menu'),
-        API.get('/categories'),
+        API.get('/categories?all=true'),
       ]);
 
       if (menuRes.data?.success && catRes.data?.success) {
@@ -189,7 +249,7 @@ const MenuManagement = () => {
 
   const resetForm = () => {
     setFormName('');
-    setFormCategory(categories.length > 0 ? categories[0]._id : '');
+    setFormCategory(activeCategories.length > 0 ? activeCategories[0]._id : '');
     setFormPrice('');
     setFormDescription('');
     setFormPreparationTime(10);
@@ -204,8 +264,8 @@ const MenuManagement = () => {
 
   const openAddModal = () => {
     resetForm();
-    if (categories.length > 0) {
-      setFormCategory(categories[0]._id);
+    if (activeCategories.length > 0) {
+      setFormCategory(activeCategories[0]._id);
     }
     setIsAddModalOpen(true);
   };
@@ -251,7 +311,8 @@ const MenuManagement = () => {
 
       const response = await API.post('/menu', formData);
       if (response.data?.success) {
-        setSuccess(`✓ Food added successfully! "${formName}" with Cloudinary image is now active on the menu.`);
+        MenuCacheService.clear();
+        setSuccess(`✓ Food added successfully! "${formName}"${formImageFile ? ' with Cloudinary image' : ''} is now active on the menu.`);
         setIsAddModalOpen(false);
         resetForm();
         fetchData();
@@ -292,6 +353,7 @@ const MenuManagement = () => {
 
       const response = await API.put(`/menu/${editingItem._id}`, formData);
       if (response.data?.success) {
+        MenuCacheService.clear();
         setSuccess(`✓ Food updated successfully! "${formName}" details and image have been updated.`);
         setEditingItem(null);
         resetForm();
@@ -552,7 +614,7 @@ const MenuManagement = () => {
               <option value="all">All Categories</option>
               {categories.map((c) => (
                 <option key={c._id} value={c._id}>
-                  {c.name}
+                  {c.name}{c.active === false ? ' (Inactive)' : ''}
                 </option>
               ))}
             </select>
@@ -706,8 +768,18 @@ const MenuManagement = () => {
 
                       {/* Category */}
                       <td className="py-3.5 px-4">
-                        <span className="bg-primary-light text-primary-dark font-bold rounded-full px-3 py-1 text-[10px]">
-                          {item.category?.name || 'Canteen'}
+                        <span
+                          className={`inline-flex items-center gap-1.5 font-bold rounded-full px-3 py-1 text-[10px] ${
+                            item.category?.active === false
+                              ? 'bg-gray-100 text-gray-600'
+                              : 'bg-primary-light text-primary-dark'
+                          }`}
+                        >
+                          <CategoryIcon category={item.category} className="w-3 h-3" />
+                          <span>
+                            {item.category?.name || 'Canteen'}
+                            {item.category?.active === false ? ' (Inactive)' : ''}
+                          </span>
                         </span>
                       </td>
 
@@ -848,8 +920,12 @@ const MenuManagement = () => {
                     </span>
                   </div>
 
-                  <span className="text-[10px] text-muted mb-4">
-                    {item.category?.name || 'Canteen'}
+                  <span className="inline-flex items-center gap-1 text-[10px] text-muted mb-4">
+                    <CategoryIcon category={item.category} className="w-3 h-3" />
+                    <span>
+                      {item.category?.name || 'Canteen'}
+                      {item.category?.active === false ? ' (Inactive)' : ''}
+                    </span>
                   </span>
 
                   {/* Actions Row */}
@@ -937,11 +1013,15 @@ const MenuManagement = () => {
                     onChange={(e) => setFormCategory(e.target.value)}
                     className="w-full bg-cream border border-border focus:border-primary focus:bg-white rounded-xl py-2.5 px-3.5 text-xs focus:outline-none transition-all"
                   >
-                    {categories.map((cat) => (
-                      <option key={cat._id} value={cat._id}>
-                        {cat.name}
-                      </option>
-                    ))}
+                    {activeCategories.length === 0 ? (
+                      <option value="">No active categories available</option>
+                    ) : (
+                      activeCategories.map((cat) => (
+                        <option key={cat._id} value={cat._id}>
+                          {cat.name}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -1173,7 +1253,12 @@ const MenuManagement = () => {
                     onChange={(e) => setFormCategory(e.target.value)}
                     className="w-full bg-cream border border-border focus:border-primary focus:bg-white rounded-xl py-2.5 px-3.5 text-xs focus:outline-none transition-all"
                   >
-                    {categories.map((cat) => (
+                    {editingItem?.category?.active === false && (
+                      <option value={editingItem.category._id}>
+                        {editingItem.category.name} (Inactive - Current)
+                      </option>
+                    )}
+                    {activeCategories.map((cat) => (
                       <option key={cat._id} value={cat._id}>
                         {cat.name}
                       </option>

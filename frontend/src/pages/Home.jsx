@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../services/api';
 import MenuCacheService from '../services/menuCache';
+import CategoryIcon from '../components/common/CategoryIcon';
 import { 
   ArrowRight, 
   Smartphone, 
@@ -23,6 +24,7 @@ const Home = () => {
   const { addToCart } = useCart();
   const [emojis, setEmojis] = useState([]);
   const [featuredItems, setFeaturedItems] = useState([]);
+  const [categories, setCategories] = useState([]);
 
   useEffect(() => {
     const list = ['🍛', '🍲', '🥤', '☕', '🍩', '⚪️', '🫓', '🥥', '🍹', '🌿', '🍱', '🥗'];
@@ -36,16 +38,29 @@ const Home = () => {
     }));
     setEmojis(temp);
 
-    // Fetch featured foods with client cache
+    // Fetch featured foods and active categories with client cache
     const fetchFeatured = async () => {
       try {
-        const cached = MenuCacheService.getFeatured();
-        if (cached && cached.length > 0) {
-          setFeaturedItems(cached.slice(0, 4));
-          if (MenuCacheService.isFeaturedFresh()) return;
+        const cachedCats = MenuCacheService.getCategories();
+        if (cachedCats && cachedCats.length > 0) {
+          setCategories(cachedCats.slice(0, 4));
         }
 
-        const res = await API.get('/menu?featuredOnly=true');
+        const cached = MenuCacheService.getFeatured();
+        if (cached && cached.length > 0) {
+          const validFeatured = cached.filter((i) => i.category?.active !== false);
+          setFeaturedItems(validFeatured.slice(0, 4));
+          if (MenuCacheService.isFeaturedFresh() && MenuCacheService.isCategoriesFresh()) return;
+        }
+
+        const [res, catRes] = await Promise.all([
+          API.get('/menu?featuredOnly=true&activeCategoriesOnly=true'),
+          API.get('/categories'),
+        ]);
+        if (catRes.data?.success) {
+          setCategories(catRes.data.data.slice(0, 4));
+          MenuCacheService.setCategories(catRes.data.data);
+        }
         if (res.data?.success) {
           setFeaturedItems(res.data.data.slice(0, 4));
           MenuCacheService.setFeatured(res.data.data);
@@ -158,15 +173,29 @@ const Home = () => {
                   </Link>
                 );
               })
+            ) : categories.length > 0 ? (
+              categories.map((cat) => (
+                <Link
+                  key={cat._id}
+                  to="/menu"
+                  className="bg-white/5 border border-white/15 rounded-2xl p-6 text-center backdrop-blur-md hover:bg-white/10 hover:-translate-y-1 transition-all flex flex-col items-center justify-center"
+                >
+                  <div className="w-12 h-12 rounded-2xl bg-amber/15 text-amber flex items-center justify-center mb-3">
+                    <CategoryIcon category={cat} className="w-7 h-7" />
+                  </div>
+                  <h4 className="font-outfit font-bold text-white text-base mb-1">{cat.name}</h4>
+                  <p className="text-white/55 text-xs">
+                    {cat.itemCount ? `${cat.itemCount} items` : 'Explore fresh menu'}
+                  </p>
+                </Link>
+              ))
             ) : (
               [
-                { emoji: '🍛', title: 'Full Meals', sub: 'Saapadu & Rice' },
-                { emoji: '⚪️', title: 'Idli & Dosa', sub: 'Fresh & Hot' },
-                { emoji: '🍩', title: 'Snacks', sub: 'Vadai & Bonda' },
-                { emoji: '🥤', title: 'Juices', sub: 'Nannari & More' }
+                { emoji: '🍛', title: 'Fresh Specials', sub: 'Made Daily' },
+                { emoji: '⏱️', title: 'Quick Pickup', sub: 'Zero Queue' },
               ].map((c, i) => (
-                <div 
-                  key={i} 
+                <div
+                  key={i}
                   className="bg-white/5 border border-white/15 rounded-2xl p-6 text-center backdrop-blur-md hover:bg-white/10 hover:-translate-y-1 transition-all"
                 >
                   <span className="text-5xl block mb-3 drop-shadow-md">{c.emoji}</span>

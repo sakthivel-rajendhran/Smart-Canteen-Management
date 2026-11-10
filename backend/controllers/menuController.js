@@ -29,10 +29,10 @@ const normalizeMenuItemImage = (item, isList = false) => {
 // @access  Public
 const getMenuItems = async (req, res) => {
   try {
-    const { category, search, availableOnly, featuredOnly, needsImage } = req.query;
+    const { category, search, availableOnly, featuredOnly, needsImage, activeCategoriesOnly } = req.query;
 
     // Cache key for identical queries
-    const cacheKey = `menu:${category || 'all'}:${search || ''}:${availableOnly || ''}:${featuredOnly || ''}:${needsImage || ''}`;
+    const cacheKey = `menu:${category || 'all'}:${search || ''}:${availableOnly || ''}:${featuredOnly || ''}:${needsImage || ''}:${activeCategoriesOnly || ''}`;
     const cachedData = cache.get(cacheKey);
 
     if (cachedData) {
@@ -80,11 +80,16 @@ const getMenuItems = async (req, res) => {
 
     const menuItems = await MenuItem.find(query)
       .select('name category description price image emoji backgroundColor available featured preparationTime createdAt')
-      .populate('category', 'name')
+      .populate('category', 'name active icon')
       .sort({ createdAt: -1 })
       .lean();
 
-    const normalized = menuItems.map((item) => normalizeMenuItemImage(item, true));
+    const filteredByCategoryStatus =
+      activeCategoriesOnly === 'true'
+        ? menuItems.filter((item) => item.category && item.category.active !== false)
+        : menuItems;
+
+    const normalized = filteredByCategoryStatus.map((item) => normalizeMenuItemImage(item, true));
     const responsePayload = { success: true, count: normalized.length, data: normalized };
 
     // Cache list results for 45 seconds
@@ -114,7 +119,7 @@ const getMenuItemById = async (req, res) => {
 
     const menuItem = await MenuItem.findById(req.params.id)
       .select('name category description price image emoji backgroundColor available featured preparationTime createdAt')
-      .populate('category', 'name')
+      .populate('category', 'name active icon')
       .lean();
 
     if (!menuItem) {
@@ -146,10 +151,22 @@ const checkMenuItems = async (req, res) => {
     }
 
     const items = await MenuItem.find({ _id: { $in: validIds } })
-      .select('_id name available price')
+      .select('_id name available price category')
+      .populate('category', 'name active')
       .lean();
 
-    res.json({ success: true, data: items });
+    const checked = items.map((item) => {
+      const categoryInactive = !item.category || item.category.active === false;
+      return {
+        _id: item._id,
+        name: item.name,
+        price: item.price,
+        available: categoryInactive ? false : item.available,
+        categoryInactive,
+      };
+    });
+
+    res.json({ success: true, data: checked });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -233,16 +250,23 @@ const createMenuItem = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please provide name, category, and price' });
     }
 
-    // Determine category name for organized Cloudinary folder hierarchy
-    let folderName = 'general';
-    try {
-      const catDoc = await Category.findById(category);
-      if (catDoc && catDoc.name) {
-        folderName = catDoc.name.toLowerCase().trim();
-      }
-    } catch {
-      // Ignore category lookup error and use default folder
+    if (!mongoose.Types.ObjectId.isValid(category)) {
+      return res.status(400).json({ success: false, message: 'Invalid category selected' });
     }
+
+    const catDoc = await Category.findById(category);
+    if (!catDoc) {
+      return res.status(404).json({ success: false, message: 'Selected category not found' });
+    }
+    if (catDoc.active === false) {
+      return res.status(400).json({
+        success: false,
+        message: `Category "${catDoc.name}" is currently inactive. Inactive categories cannot be assigned to new food items.`,
+      });
+    }
+
+    // Determine category name for organized Cloudinary folder hierarchy
+    const folderName = catDoc.name ? catDoc.name.toLowerCase().trim() : 'general';
 
     let imageData = {
       url: imageUrl || '',
@@ -288,7 +312,7 @@ const createMenuItem = async (req, res) => {
       throw dbError;
     }
 
-    const populatedItem = await MenuItem.findById(menuItem._id).populate('category');
+    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active icon');
     const normalizedItem = normalizeMenuItemImage(populatedItem);
 
     // Broadcast real-time event via Socket.IO
@@ -298,6 +322,7 @@ const createMenuItem = async (req, res) => {
     }
 
     cache.clearPrefix('menu');
+    cache.clearPrefix('categories');
 
     res.status(201).json({
       success: true,
@@ -383,8 +408,24 @@ const updateMenuItem = async (req, res) => {
       };
     }
 
+    if (category !== undefined && String(category) !== String(menuItem.category)) {
+      if (!mongoose.Types.ObjectId.isValid(category)) {
+        return res.status(400).json({ success: false, message: 'Invalid category selected' });
+      }
+      const catDoc = await Category.findById(category);
+      if (!catDoc) {
+        return res.status(404).json({ success: false, message: 'Selected category not found' });
+      }
+      if (catDoc.active === false) {
+        return res.status(400).json({
+          success: false,
+          message: `Category "${catDoc.name}" is inactive. Please select an active category.`,
+        });
+      }
+      menuItem.category = category;
+    }
+
     if (name !== undefined) menuItem.name = name.trim();
-    if (category !== undefined) menuItem.category = category;
     if (description !== undefined) menuItem.description = description.trim();
     if (price !== undefined) menuItem.price = Number(price);
     menuItem.image = imageData;
@@ -411,7 +452,7 @@ const updateMenuItem = async (req, res) => {
       await deleteCloudinaryAsset(oldPublicId);
     }
 
-    const populatedItem = await MenuItem.findById(menuItem._id).populate('category');
+    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active icon');
     const normalizedItem = normalizeMenuItemImage(populatedItem);
 
     // Broadcast real-time event via Socket.IO
@@ -421,6 +462,7 @@ const updateMenuItem = async (req, res) => {
     }
 
     cache.clearPrefix('menu');
+    cache.clearPrefix('categories');
 
     res.json({
       success: true,
@@ -467,6 +509,7 @@ const deleteMenuItem = async (req, res) => {
     }
 
     cache.clearPrefix('menu');
+    cache.clearPrefix('categories');
 
     res.json({ success: true, message: 'Menu item removed successfully' });
   } catch (error) {
@@ -491,7 +534,7 @@ const toggleAvailability = async (req, res) => {
     menuItem.available = !menuItem.available;
     await menuItem.save();
 
-    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name').lean();
+    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active icon').lean();
     const normalizedItem = normalizeMenuItemImage(populatedItem, false);
 
     // Broadcast real-time event via Socket.IO

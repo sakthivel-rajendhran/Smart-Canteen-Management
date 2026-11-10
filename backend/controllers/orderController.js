@@ -52,7 +52,9 @@ const createOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid item ID found in order' });
     }
 
-    const dbItems = await MenuItem.find({ _id: { $in: itemIds } }).lean();
+    const dbItems = await MenuItem.find({ _id: { $in: itemIds } })
+      .populate('category', 'name active')
+      .lean();
     const dbItemMap = new Map(dbItems.map((item) => [item._id.toString(), item]));
 
     let subtotal = 0;
@@ -70,6 +72,13 @@ const createOrder = async (req, res) => {
       const dbItem = dbItemMap.get(String(item.menuItem));
       if (!dbItem) {
         return res.status(404).json({ success: false, message: `Menu item not found: ${item.name || item.menuItem}` });
+      }
+
+      if (dbItem.category && dbItem.category.active === false) {
+        return res.status(400).json({
+          success: false,
+          message: `"${dbItem.name}" belongs to an inactive category ("${dbItem.category.name}") and cannot be ordered right now.`
+        });
       }
 
       if (!dbItem.available) {

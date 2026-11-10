@@ -7,6 +7,7 @@ import MenuCacheService from '../services/menuCache';
 import FoodCard from '../components/food/FoodCard';
 import FoodDetailModal from '../components/food/FoodDetailModal';
 import MenuSkeleton from '../components/skeletons/MenuSkeleton';
+import CategoryIcon from '../components/common/CategoryIcon';
 import {
   Search,
   HelpCircle,
@@ -89,16 +90,79 @@ const Menu = () => {
       });
     };
 
+    const handleCategoryCreated = (newCat) => {
+      if (newCat.active === false) return;
+      setCategories((prev) => {
+        if (prev.some((c) => c._id === newCat._id)) return prev;
+        const updated = [...prev, newCat].sort((a, b) => a.name.localeCompare(b.name));
+        MenuCacheService.setCategories(updated);
+        return updated;
+      });
+    };
+
+    const handleCategoryUpdated = (updatedCat) => {
+      setCategories((prev) => {
+        let updated;
+        if (updatedCat.active === false) {
+          updated = prev.filter((c) => c._id !== updatedCat._id);
+        } else if (prev.some((c) => c._id === updatedCat._id)) {
+          updated = prev.map((c) => (c._id === updatedCat._id ? updatedCat : c));
+        } else {
+          updated = [...prev, updatedCat];
+        }
+        updated = updated.sort((a, b) => a.name.localeCompare(b.name));
+        MenuCacheService.setCategories(updated);
+        return updated;
+      });
+
+      if (updatedCat.active === false) {
+        setActiveCategory((prev) => (prev === updatedCat._id ? 'all' : prev));
+      }
+
+      setMenuItems((prev) => {
+        const updated = prev.map((item) =>
+          item.category?._id === updatedCat._id
+            ? {
+                ...item,
+                category: {
+                  ...item.category,
+                  name: updatedCat.name,
+                  active: updatedCat.active,
+                  icon: updatedCat.icon,
+                },
+              }
+            : item
+        );
+        MenuCacheService.setMenu(updated);
+        return updated;
+      });
+    };
+
+    const handleCategoryDeleted = ({ id }) => {
+      setCategories((prev) => {
+        const updated = prev.filter((c) => c._id !== id);
+        MenuCacheService.setCategories(updated);
+        return updated;
+      });
+      setActiveCategory((prev) => (prev === id ? 'all' : prev));
+    };
+
     socket.on('menu:created', handleCreated);
     socket.on('menu:updated', handleUpdated);
     socket.on('menu:deleted', handleDeleted);
     socket.on('menu:availabilityChanged', handleAvailability);
+    socket.on('category:created', handleCategoryCreated);
+    socket.on('category:updated', handleCategoryUpdated);
+    socket.on('category:deleted', handleCategoryDeleted);
 
     return () => {
       socket.off('menu:created', handleCreated);
       socket.off('menu:updated', handleUpdated);
       socket.off('menu:deleted', handleDeleted);
       socket.off('menu:availabilityChanged', handleAvailability);
+      socket.off('category:created', handleCategoryCreated);
+      socket.off('category:updated', handleCategoryUpdated);
+      socket.off('category:deleted', handleCategoryDeleted);
     };
   }, [socket]);
 
@@ -112,7 +176,7 @@ const Menu = () => {
     try {
       const [catRes, menuRes] = await Promise.all([
         API.get('/categories'),
-        API.get('/menu'),
+        API.get('/menu?activeCategoriesOnly=true'),
       ]);
 
       if (catRes.data?.success && menuRes.data?.success) {
@@ -135,9 +199,14 @@ const Menu = () => {
     return item ? item.quantity : 0;
   };
 
+  // Exclude any food item whose category was deactivated
+  const activeMenuItems = useMemo(() => {
+    return menuItems.filter((item) => item.category && item.category.active !== false);
+  }, [menuItems]);
+
   // Filter items efficiently
   const filteredItems = useMemo(() => {
-    return menuItems.filter((item) => {
+    return activeMenuItems.filter((item) => {
       const matchesCategory =
         activeCategory === 'all' || item.category?._id === activeCategory;
 
@@ -153,7 +222,7 @@ const Menu = () => {
 
       return matchesCategory && matchesSearch && matchesAvailable && matchesFeatured;
     });
-  }, [menuItems, activeCategory, debouncedQuery, onlyAvailable, onlyFeatured]);
+  }, [activeMenuItems, activeCategory, debouncedQuery, onlyAvailable, onlyFeatured]);
 
   const cartTotal = cart.reduce((acc, item) => acc + item.price * item.quantity, 0);
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
@@ -192,12 +261,10 @@ const Menu = () => {
                   : 'bg-cream text-muted hover:bg-gray-100 hover:text-primary-dark'
               }`}
             >
-              <span>🍽️</span> All Items ({menuItems.length})
+              <span>🍽️</span> All Items ({activeMenuItems.length})
             </button>
             {categories.map((cat) => {
-              const count = menuItems.filter((i) => i.category?._id === cat._id).length;
-              const emojiIcon =
-                cat.name === 'Meals' ? '🍛' : cat.name === 'Snacks' ? '🍿' : '🥤';
+              const count = activeMenuItems.filter((i) => i.category?._id === cat._id).length;
 
               return (
                 <button
@@ -209,7 +276,8 @@ const Menu = () => {
                       : 'bg-cream text-muted hover:bg-gray-100 hover:text-primary-dark'
                   }`}
                 >
-                  <span>{emojiIcon}</span> {cat.name} ({count})
+                  <CategoryIcon category={cat} className="w-3.5 h-3.5 shrink-0" />
+                  <span>{cat.name} ({count})</span>
                 </button>
               );
             })}
