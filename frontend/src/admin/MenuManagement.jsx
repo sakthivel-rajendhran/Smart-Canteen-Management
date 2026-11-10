@@ -2,7 +2,6 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import API from '../services/api';
 import MenuCacheService from '../services/menuCache';
 import { useSocket } from '../context/SocketContext';
-import CategoryIcon from '../components/common/CategoryIcon';
 import {
   Utensils,
   Plus,
@@ -104,7 +103,6 @@ const MenuManagement = () => {
                   ...item.category,
                   name: updatedCat.name,
                   active: updatedCat.active,
-                  icon: updatedCat.icon,
                 },
               }
             : item
@@ -769,17 +767,14 @@ const MenuManagement = () => {
                       {/* Category */}
                       <td className="py-3.5 px-4">
                         <span
-                          className={`inline-flex items-center gap-1.5 font-bold rounded-full px-3 py-1 text-[10px] ${
+                          className={`inline-flex items-center font-bold rounded-full px-3 py-1 text-[10px] ${
                             item.category?.active === false
                               ? 'bg-gray-100 text-gray-600'
                               : 'bg-primary-light text-primary-dark'
                           }`}
                         >
-                          <CategoryIcon category={item.category} className="w-3 h-3" />
-                          <span>
-                            {item.category?.name || 'Canteen'}
-                            {item.category?.active === false ? ' (Inactive)' : ''}
-                          </span>
+                          {item.category?.name || 'Canteen'}
+                          {item.category?.active === false ? ' (Inactive)' : ''}
                         </span>
                       </td>
 
@@ -920,12 +915,9 @@ const MenuManagement = () => {
                     </span>
                   </div>
 
-                  <span className="inline-flex items-center gap-1 text-[10px] text-muted mb-4">
-                    <CategoryIcon category={item.category} className="w-3 h-3" />
-                    <span>
-                      {item.category?.name || 'Canteen'}
-                      {item.category?.active === false ? ' (Inactive)' : ''}
-                    </span>
+                  <span className="text-[10px] text-muted mb-4 block">
+                    {item.category?.name || 'Canteen'}
+                    {item.category?.active === false ? ' (Inactive)' : ''}
                   </span>
 
                   {/* Actions Row */}

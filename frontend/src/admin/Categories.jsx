@@ -1,28 +1,18 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../services/api';
 import MenuCacheService from '../services/menuCache';
 import { useSocket } from '../context/SocketContext';
-import CategoryIcon from '../components/common/CategoryIcon';
 import {
-  CATEGORY_ICON_PRESETS,
-  validateAndCleanSvgClient,
-  getCategoryIconSvg,
-} from '../utils/categoryIcons';
-import {
-  Folder,
   Plus,
   Trash2,
   Pencil,
   CheckCircle2,
   AlertCircle,
-  Upload,
   X,
   Power,
   ShieldAlert,
   ArrowRight,
-  RotateCcw,
-  Check,
 } from 'lucide-react';
 
 const Categories = () => {
@@ -39,12 +29,8 @@ const Categories = () => {
   const [editingCategory, setEditingCategory] = useState(null);
   const [formName, setFormName] = useState('');
   const [formActive, setFormActive] = useState(true);
-  const [formIconSvg, setFormIconSvg] = useState('');
-  const [iconReplaced, setIconReplaced] = useState(false);
-  const [uploadedFileName, setUploadedFileName] = useState('');
   const [modalError, setModalError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const svgFileInputRef = useRef(null);
 
   // Delete Confirmation / Protection Modal State
   const [deletingCategory, setDeletingCategory] = useState(null);
@@ -55,7 +41,7 @@ const Categories = () => {
     fetchCategories();
   }, []);
 
-  // Keep list & item counts synchronized across sessions
+  // Synchronize category & item count changes in real time
   useEffect(() => {
     if (!socket) return;
 
@@ -138,9 +124,6 @@ const Categories = () => {
     setEditingCategory(null);
     setFormName('');
     setFormActive(true);
-    setFormIconSvg(CATEGORY_ICON_PRESETS[0].svg);
-    setIconReplaced(true);
-    setUploadedFileName('');
     setModalError('');
     setIsFormModalOpen(true);
   };
@@ -150,9 +133,6 @@ const Categories = () => {
     setEditingCategory(cat);
     setFormName(cat.name || '');
     setFormActive(cat.active !== false);
-    setFormIconSvg(cat.icon || '');
-    setIconReplaced(false);
-    setUploadedFileName('');
     setModalError('');
     setIsFormModalOpen(true);
   };
@@ -162,62 +142,6 @@ const Categories = () => {
     setIsFormModalOpen(false);
     setEditingCategory(null);
     setModalError('');
-  };
-
-  // Select Preset SVG Icon
-  const handleSelectPresetIcon = (presetSvg) => {
-    setFormIconSvg(presetSvg);
-    setIconReplaced(true);
-    setUploadedFileName('');
-    setModalError('');
-  };
-
-  // Preserve original icon when editing
-  const handleKeepOriginalIcon = () => {
-    if (!editingCategory) return;
-    setFormIconSvg(editingCategory.icon || '');
-    setIconReplaced(false);
-    setUploadedFileName('');
-    setModalError('');
-    if (svgFileInputRef.current) svgFileInputRef.current.value = '';
-  };
-
-  // Upload & Validate Custom .SVG File
-  const handleSvgFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const isSvgMime =
-      file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
-    if (!isSvgMime) {
-      setModalError('Invalid file format. Only .svg vector files are allowed for category icons.');
-      e.target.value = '';
-      return;
-    }
-
-    if (file.size > 60 * 1024) {
-      setModalError('SVG file is too large. Please upload an SVG icon under 60 KB.');
-      e.target.value = '';
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = typeof reader.result === 'string' ? reader.result : '';
-      const validation = validateAndCleanSvgClient(text);
-      if (!validation.valid) {
-        setModalError(validation.message || 'Invalid SVG markup.');
-        return;
-      }
-      setFormIconSvg(validation.svg);
-      setIconReplaced(true);
-      setUploadedFileName(file.name);
-      setModalError('');
-    };
-    reader.onerror = () => {
-      setModalError('Failed to read the selected SVG file.');
-    };
-    reader.readAsText(file);
   };
 
   // Submit Create or Edit Category
@@ -236,16 +160,10 @@ const Categories = () => {
 
     try {
       if (editingCategory) {
-        const payload = {
+        const response = await API.put(`/categories/${editingCategory._id}`, {
           name: cleanName,
           active: formActive,
-        };
-        // Only transmit icon when a new replacement icon was chosen
-        if (iconReplaced) {
-          payload.icon = formIconSvg;
-        }
-
-        const response = await API.put(`/categories/${editingCategory._id}`, payload);
+        });
         if (response.data?.success) {
           const updated = response.data.data;
           setCategories((prev) =>
@@ -259,13 +177,10 @@ const Categories = () => {
           setEditingCategory(null);
         }
       } else {
-        const payload = {
+        const response = await API.post('/categories', {
           name: cleanName,
           active: formActive,
-          icon: formIconSvg || CATEGORY_ICON_PRESETS[0].svg,
-        };
-
-        const response = await API.post('/categories', payload);
+        });
         if (response.data?.success) {
           const created = response.data.data;
           setCategories((prev) =>
@@ -341,10 +256,7 @@ const Categories = () => {
         setDeletingCategory(null);
       }
     } catch (err) {
-      setDeleteError(
-        err.response?.data?.message || 'Failed to delete category.'
-      );
-      // Sync categories if server reported assigned items
+      setDeleteError(err.response?.data?.message || 'Failed to delete category.');
       if (err.response?.data?.assignedCount !== undefined) {
         fetchCategories(true);
       }
@@ -380,21 +292,16 @@ const Categories = () => {
     }
   };
 
-  const previewSvg = editingCategory && !iconReplaced
-    ? getCategoryIconSvg(editingCategory)
-    : formIconSvg || CATEGORY_ICON_PRESETS[0].svg;
-
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 pb-24">
       {/* Header Row */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-7">
         <div>
-          <h1 className="font-outfit font-black text-3xl text-primary-dark flex items-center gap-2.5">
-            <Folder className="w-8 h-8 text-primary shrink-0" />
-            <span>Category Management</span>
+          <h1 className="font-outfit font-black text-3xl text-primary-dark">
+            Category Management
           </h1>
           <p className="text-xs text-muted mt-1">
-            Add, rename, customize SVG icons, activate/deactivate, or safely manage menu food categories in real time.
+            Add, rename, activate/deactivate, or safely manage menu food categories in real time.
           </p>
         </div>
 
@@ -475,7 +382,7 @@ const Categories = () => {
       <div className="bg-white border border-border rounded-3xl shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-cream/40">
           <h2 className="font-outfit font-bold text-base text-primary-dark">
-            Active Categories List
+            Active Categories
           </h2>
           <span className="text-[11px] font-bold text-muted">
             Showing {filteredCategories.length} {filteredCategories.length === 1 ? 'category' : 'categories'}
@@ -488,7 +395,6 @@ const Categories = () => {
           </div>
         ) : filteredCategories.length === 0 ? (
           <div className="py-16 text-center px-4">
-            <Folder className="w-12 h-12 text-gray-300 mx-auto mb-3" />
             <p className="text-sm font-bold text-primary-dark mb-1">
               No categories found
             </p>
@@ -509,14 +415,13 @@ const Categories = () => {
           </div>
         ) : (
           <>
-            {/* Desktop Table View */}
+            {/* Desktop Table View (Text-based: Category Name | Status | Actions) */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-border bg-cream/60 text-[10px] font-extrabold uppercase tracking-wider text-muted">
-                    <th className="py-3.5 px-6 w-24">Icon</th>
-                    <th className="py-3.5 px-4">Category Name</th>
-                    <th className="py-3.5 px-4 w-44">Status</th>
+                    <th className="py-3.5 px-6">Category Name</th>
+                    <th className="py-3.5 px-4 w-48">Status</th>
                     <th className="py-3.5 px-6 text-right w-72">Actions</th>
                   </tr>
                 </thead>
@@ -532,21 +437,8 @@ const Categories = () => {
                           !isActive ? 'bg-gray-50/70' : ''
                         }`}
                       >
-                        {/* Icon */}
-                        <td className="py-4 px-6">
-                          <div
-                            className={`w-10 h-10 rounded-xl border flex items-center justify-center transition-colors ${
-                              isActive
-                                ? 'bg-primary-light/40 border-primary/20 text-primary-dark'
-                                : 'bg-gray-100 border-gray-200 text-gray-400'
-                            }`}
-                          >
-                            <CategoryIcon category={cat} className="w-5 h-5" />
-                          </div>
-                        </td>
-
                         {/* Category Name */}
-                        <td className="py-4 px-4">
+                        <td className="py-4 px-6">
                           <div className="flex items-center gap-2.5">
                             <span
                               className={`font-outfit font-bold text-sm ${
@@ -555,7 +447,7 @@ const Categories = () => {
                             >
                               {cat.name}
                             </span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cream border border-border text-muted">
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-cream border border-border text-muted">
                               {itemCount} {itemCount === 1 ? 'item' : 'items'}
                             </span>
                           </div>
@@ -634,23 +526,12 @@ const Categories = () => {
                     className={`p-4 flex flex-col gap-3 ${!isActive ? 'bg-gray-50/80' : ''}`}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div
-                          className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
-                            isActive
-                              ? 'bg-primary-light/40 border-primary/20 text-primary-dark'
-                              : 'bg-gray-100 border-gray-200 text-gray-400'
-                          }`}
-                        >
-                          <CategoryIcon category={cat} className="w-5 h-5" />
+                      <div className="min-w-0">
+                        <div className="font-outfit font-bold text-sm text-primary-dark truncate">
+                          {cat.name}
                         </div>
-                        <div className="min-w-0">
-                          <div className="font-outfit font-bold text-sm text-primary-dark truncate">
-                            {cat.name}
-                          </div>
-                          <div className="text-[11px] text-muted font-semibold">
-                            {itemCount} {itemCount === 1 ? 'food item' : 'food items'}
-                          </div>
+                        <div className="text-[11px] text-muted font-semibold mt-0.5">
+                          {itemCount} {itemCount === 1 ? 'food item' : 'food items'}
                         </div>
                       </div>
 
@@ -702,22 +583,17 @@ const Categories = () => {
       {/* ==================== ADD / EDIT CATEGORY MODAL ==================== */}
       {isFormModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-border rounded-3xl shadow-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto animate-in zoom-in-95 duration-150">
-            <div className="px-6 py-4 border-b border-border flex items-center justify-between sticky top-0 bg-white z-10 rounded-t-3xl">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-primary-light text-primary-dark flex items-center justify-center">
-                  {editingCategory ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                </div>
-                <div>
-                  <h3 className="font-outfit font-bold text-base text-primary-dark">
-                    {editingCategory ? `Edit / Rename "${editingCategory.name}"` : 'Add New Category'}
-                  </h3>
-                  <p className="text-[11px] text-muted">
-                    {editingCategory
-                      ? 'Assigned food items stay linked automatically when renaming.'
-                      : 'Create a new food category stored dynamically in MongoDB.'}
-                  </p>
-                </div>
+          <div className="bg-white border border-border rounded-3xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+              <div>
+                <h3 className="font-outfit font-bold text-base text-primary-dark">
+                  {editingCategory ? `Edit / Rename "${editingCategory.name}"` : 'Add New Category'}
+                </h3>
+                <p className="text-[11px] text-muted mt-0.5">
+                  {editingCategory
+                    ? 'Assigned food items stay linked automatically when renaming.'
+                    : 'Create a new food category stored dynamically in the database.'}
+                </p>
               </div>
 
               <button
@@ -754,101 +630,7 @@ const Categories = () => {
                 />
               </div>
 
-              {/* Field 2: Category Icon (SVG) */}
-              <div className="bg-cream/60 border border-border rounded-2xl p-4 flex flex-col gap-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-muted uppercase tracking-wider font-outfit">
-                      Category Icon (SVG)
-                    </label>
-                    <p className="text-[11px] text-muted mt-0.5">
-                      {editingCategory && !iconReplaced
-                        ? 'Current icon is preserved unless you select or upload a replacement.'
-                        : uploadedFileName
-                        ? `Uploaded SVG: ${uploadedFileName}`
-                        : 'Select a preset SVG icon or upload a custom .svg file.'}
-                    </p>
-                  </div>
-
-                  {/* Live Preview */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div
-                      title="Live Icon Preview"
-                      className="w-11 h-11 rounded-2xl bg-primary-dark text-white flex items-center justify-center shadow-sm border border-primary/20"
-                    >
-                      <CategoryIcon svg={previewSvg} className="w-6 h-6" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Preset SVG Grid */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-bold text-primary-dark">
-                      Preset Vector Icons
-                    </span>
-                    {editingCategory && iconReplaced && (
-                      <button
-                        type="button"
-                        onClick={handleKeepOriginalIcon}
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline cursor-pointer"
-                      >
-                        <RotateCcw className="w-3 h-3" /> Keep Current Icon
-                      </button>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-5 gap-2">
-                    {CATEGORY_ICON_PRESETS.map((preset) => {
-                      const isSelected =
-                        (iconReplaced || !editingCategory) && formIconSvg === preset.svg;
-
-                      return (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => handleSelectPresetIcon(preset.svg)}
-                          title={preset.label}
-                          className={`relative flex flex-col items-center justify-center gap-1 py-2.5 px-1.5 rounded-xl border text-[10px] font-semibold transition-all cursor-pointer ${
-                            isSelected
-                              ? 'bg-primary-light border-primary text-primary-dark shadow-xs'
-                              : 'bg-white border-border text-muted hover:border-primary/40 hover:text-primary-dark'
-                          }`}
-                        >
-                          {isSelected && (
-                            <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-primary text-white rounded-full flex items-center justify-center">
-                              <Check className="w-2.5 h-2.5" />
-                            </span>
-                          )}
-                          <CategoryIcon svg={preset.svg} className="w-4.5 h-4.5" />
-                          <span className="truncate w-full text-center px-0.5 text-[9px]">
-                            {preset.label.split('/')[0].trim()}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Upload Custom SVG Option */}
-                <div className="pt-2 border-t border-border/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-muted">
-                    Or upload a custom SVG file (.svg, max 60 KB):
-                  </span>
-                  <label className="inline-flex items-center justify-center gap-1.5 bg-white hover:bg-primary-light text-primary-dark border border-border hover:border-primary/40 font-bold text-xs px-3.5 py-2 rounded-xl cursor-pointer transition-all shrink-0">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Upload .SVG</span>
-                    <input
-                      ref={svgFileInputRef}
-                      type="file"
-                      accept=".svg,image/svg+xml"
-                      onChange={handleSvgFileChange}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Field 3: Category Status */}
+              {/* Field 2: Category Status */}
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 font-outfit">
                   Category Status

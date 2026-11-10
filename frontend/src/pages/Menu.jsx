@@ -7,7 +7,6 @@ import MenuCacheService from '../services/menuCache';
 import FoodCard from '../components/food/FoodCard';
 import FoodDetailModal from '../components/food/FoodDetailModal';
 import MenuSkeleton from '../components/skeletons/MenuSkeleton';
-import CategoryIcon from '../components/common/CategoryIcon';
 import {
   Search,
   HelpCircle,
@@ -128,7 +127,6 @@ const Menu = () => {
                   ...item.category,
                   name: updatedCat.name,
                   active: updatedCat.active,
-                  icon: updatedCat.icon,
                 },
               }
             : item
@@ -254,33 +252,30 @@ const Menu = () => {
           {/* Categories Tab Scroll */}
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
             <button
+              type="button"
               onClick={() => setActiveCategory('all')}
-              className={`px-4.5 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+              className={`h-9 px-4.5 rounded-full text-xs font-bold whitespace-nowrap transition-all inline-flex items-center justify-center cursor-pointer ${
                 activeCategory === 'all'
                   ? 'bg-primary-dark text-white shadow-md'
                   : 'bg-cream text-muted hover:bg-gray-100 hover:text-primary-dark'
               }`}
             >
-              <span>🍽️</span> All Items ({activeMenuItems.length})
+              All Categories
             </button>
-            {categories.map((cat) => {
-              const count = activeMenuItems.filter((i) => i.category?._id === cat._id).length;
-
-              return (
-                <button
-                  key={cat._id}
-                  onClick={() => setActiveCategory(cat._id)}
-                  className={`px-4.5 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                    activeCategory === cat._id
-                      ? 'bg-primary-dark text-white shadow-md'
-                      : 'bg-cream text-muted hover:bg-gray-100 hover:text-primary-dark'
-                  }`}
-                >
-                  <CategoryIcon category={cat} className="w-3.5 h-3.5 shrink-0" />
-                  <span>{cat.name} ({count})</span>
-                </button>
-              );
-            })}
+            {categories.map((cat) => (
+              <button
+                key={cat._id}
+                type="button"
+                onClick={() => setActiveCategory(cat._id)}
+                className={`h-9 px-4.5 rounded-full text-xs font-bold whitespace-nowrap transition-all inline-flex items-center justify-center cursor-pointer ${
+                  activeCategory === cat._id
+                    ? 'bg-primary-dark text-white shadow-md'
+                    : 'bg-cream text-muted hover:bg-gray-100 hover:text-primary-dark'
+                }`}
+              >
+                {cat.name}
+              </button>
+            ))}
           </div>
 
           {/* Quick Filter Toggles */}

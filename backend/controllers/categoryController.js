@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 import Category from '../models/Category.js';
 import MenuItem from '../models/MenuItem.js';
 import { cache } from '../utils/cache.js';
-import { validateAndSanitizeSvg, escapeRegex } from '../utils/svgSanitizer.js';
+
+const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Helper to attach assigned menu item counts to category records
 const attachItemCounts = async (categories) => {
@@ -36,7 +37,10 @@ const getCategories = async (req, res) => {
     }
 
     const filter = isAll ? {} : { active: { $ne: false } };
-    const categories = await Category.find(filter).sort({ name: 1 }).lean();
+    const categories = await Category.find(filter)
+      .select('name active createdAt updatedAt')
+      .sort({ name: 1 })
+      .lean();
     const enrichedCategories = await attachItemCounts(categories);
     const responsePayload = { success: true, data: enrichedCategories };
 
@@ -54,7 +58,7 @@ const getCategories = async (req, res) => {
 // @access  Private/Admin
 const createCategory = async (req, res) => {
   try {
-    const { name, icon, active } = req.body;
+    const { name, active } = req.body;
     if (!name || !String(name).trim()) {
       return res.status(400).json({ success: false, message: 'Category name is required' });
     }
@@ -67,24 +71,21 @@ const createCategory = async (req, res) => {
       return res.status(400).json({ success: false, message: `Category "${cleanName}" already exists` });
     }
 
-    let cleanIcon = '';
-    if (icon !== undefined && icon !== null && String(icon).trim() !== '') {
-      const svgCheck = validateAndSanitizeSvg(String(icon));
-      if (!svgCheck.valid) {
-        return res.status(400).json({ success: false, message: svgCheck.message });
-      }
-      cleanIcon = svgCheck.svg;
-    }
-
     const isActive = active === undefined ? true : Boolean(active === true || active === 'true');
 
     const category = await Category.create({
       name: cleanName,
-      icon: cleanIcon,
       active: isActive,
     });
 
-    const payload = { ...category.toObject(), itemCount: 0 };
+    const payload = {
+      _id: category._id,
+      name: category.name,
+      active: category.active,
+      createdAt: category.createdAt,
+      updatedAt: category.updatedAt,
+      itemCount: 0,
+    };
 
     cache.clearPrefix('categories');
     cache.clearPrefix('menu');
@@ -107,7 +108,7 @@ const createCategory = async (req, res) => {
   }
 };
 
-// @desc    Update category (rename, update icon, or activate/deactivate)
+// @desc    Update category (rename or activate/deactivate)
 // @route   PUT /api/categories/:id
 // @access  Private/Admin
 const updateCategory = async (req, res) => {
@@ -116,7 +117,7 @@ const updateCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Category not found' });
     }
 
-    const { name, icon, active } = req.body;
+    const { name, active } = req.body;
     const category = await Category.findById(req.params.id);
 
     if (!category) {
@@ -143,21 +144,6 @@ const updateCategory = async (req, res) => {
       category.name = cleanName;
     }
 
-    // Preserve current icon unless a replacement icon payload is explicitly passed
-    if (icon !== undefined) {
-      if (icon === null || String(icon).trim() === '') {
-        if (req.body.clearIcon === true) {
-          category.icon = '';
-        }
-      } else {
-        const svgCheck = validateAndSanitizeSvg(String(icon));
-        if (!svgCheck.valid) {
-          return res.status(400).json({ success: false, message: svgCheck.message });
-        }
-        category.icon = svgCheck.svg;
-      }
-    }
-
     if (active !== undefined) {
       category.active = Boolean(active === true || active === 'true');
     }
@@ -165,7 +151,14 @@ const updateCategory = async (req, res) => {
     await category.save();
 
     const itemCount = await MenuItem.countDocuments({ category: category._id });
-    const payload = { ...category.toObject(), itemCount };
+    const payload = {
+      _id: category._id,
+      name: category.name,
+      active: category.active,
+      createdAt: category.createdAt,
+      updatedAt: category.updatedAt,
+      itemCount,
+    };
 
     cache.clearPrefix('categories');
     cache.clearPrefix('menu');

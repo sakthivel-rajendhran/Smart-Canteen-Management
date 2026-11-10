@@ -80,7 +80,7 @@ const getMenuItems = async (req, res) => {
 
     const menuItems = await MenuItem.find(query)
       .select('name category description price image emoji backgroundColor available featured preparationTime createdAt')
-      .populate('category', 'name active icon')
+      .populate('category', 'name active')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -119,7 +119,7 @@ const getMenuItemById = async (req, res) => {
 
     const menuItem = await MenuItem.findById(req.params.id)
       .select('name category description price image emoji backgroundColor available featured preparationTime createdAt')
-      .populate('category', 'name active icon')
+      .populate('category', 'name active')
       .lean();
 
     if (!menuItem) {
@@ -312,7 +312,7 @@ const createMenuItem = async (req, res) => {
       throw dbError;
     }
 
-    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active icon');
+    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active');
     const normalizedItem = normalizeMenuItemImage(populatedItem);
 
     // Broadcast real-time event via Socket.IO
@@ -452,7 +452,7 @@ const updateMenuItem = async (req, res) => {
       await deleteCloudinaryAsset(oldPublicId);
     }
 
-    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active icon');
+    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active');
     const normalizedItem = normalizeMenuItemImage(populatedItem);
 
     // Broadcast real-time event via Socket.IO
@@ -534,7 +534,7 @@ const toggleAvailability = async (req, res) => {
     menuItem.available = !menuItem.available;
     await menuItem.save();
 
-    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active icon').lean();
+    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active').lean();
     const normalizedItem = normalizeMenuItemImage(populatedItem, false);
 
     // Broadcast real-time event via Socket.IO

@@ -9,10 +9,6 @@ const categorySchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
-    icon: {
-      type: String,
-      default: '',
-    },
     active: {
       type: Boolean,
       default: true,

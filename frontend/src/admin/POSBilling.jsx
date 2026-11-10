@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../services/api';
 import { useSocket } from '../context/SocketContext';
-import CategoryIcon from '../components/common/CategoryIcon';
 import ThermalReceiptModal from '../components/common/ThermalReceiptModal';
 import {
   Search,
@@ -91,7 +90,6 @@ const POSBilling = () => {
                   ...item.category,
                   name: updatedCat.name,
                   active: updatedCat.active,
-                  icon: updatedCat.icon,
                 },
               }
             : item
@@ -489,14 +487,13 @@ const POSBilling = () => {
                   key={cat._id}
                   type="button"
                   onClick={() => setSelectedCategory(cat._id)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all inline-flex items-center gap-1.5 ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all ${
                     selectedCategory === cat._id
                       ? 'bg-[#0b3d2e] text-white shadow-xs'
                       : 'bg-white text-stone-600 hover:bg-stone-50 border border-stone-200'
                   }`}
                 >
-                  <CategoryIcon category={cat} className="w-3.5 h-3.5 shrink-0" />
-                  <span>{cat.name}</span>
+                  {cat.name}
                 </button>
               ))}
             </div>

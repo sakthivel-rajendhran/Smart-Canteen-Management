@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../services/api';
 import MenuCacheService from '../services/menuCache';
-import CategoryIcon from '../components/common/CategoryIcon';
 import { 
   ArrowRight, 
   Smartphone, 
@@ -180,9 +179,6 @@ const Home = () => {
                   to="/menu"
                   className="bg-white/5 border border-white/15 rounded-2xl p-6 text-center backdrop-blur-md hover:bg-white/10 hover:-translate-y-1 transition-all flex flex-col items-center justify-center"
                 >
-                  <div className="w-12 h-12 rounded-2xl bg-amber/15 text-amber flex items-center justify-center mb-3">
-                    <CategoryIcon category={cat} className="w-7 h-7" />
-                  </div>
                   <h4 className="font-outfit font-bold text-white text-base mb-1">{cat.name}</h4>
                   <p className="text-white/55 text-xs">
                     {cat.itemCount ? `${cat.itemCount} items` : 'Explore fresh menu'}
