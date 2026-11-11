@@ -123,7 +123,7 @@ const Login = () => {
     let active = true;
 
     const completeFirebaseRedirectIfNeeded = async (serverFirebaseCfg) => {
-      const fb = getFirebaseAuthClient(serverFirebaseCfg);
+      const fb = await getFirebaseAuthClient(serverFirebaseCfg);
       if (!fb) return;
       try {
         const result = await fb.getRedirectResult(fb.auth);
@@ -286,7 +286,7 @@ const Login = () => {
     setSuccess('');
 
     // Primary flow: Firebase Google Authentication
-    const fb = getFirebaseAuthClient(authProviderConfig.firebase);
+    const fb = await getFirebaseAuthClient(authProviderConfig.firebase);
     if (fb) {
       setGoogleSubmitting(true);
       try {

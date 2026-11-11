@@ -1,13 +1,3 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import {
-  getAuth,
-  GoogleAuthProvider,
-  signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
-  signOut,
-} from 'firebase/auth';
-
 export const getEnvFirebaseConfig = () => {
   const apiKey = String(import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
   const authDomain = String(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '').trim();
@@ -26,29 +16,38 @@ export const getEnvFirebaseConfig = () => {
   };
 };
 
-export const getFirebaseAuthClient = (serverFirebaseConfig = null) => {
+export const getFirebaseAuthClient = async (serverFirebaseConfig = null) => {
   const config = getEnvFirebaseConfig() || serverFirebaseConfig;
   if (!config?.apiKey || !config?.authDomain || !config?.projectId) {
     return null;
   }
 
+  const [{ initializeApp, getApps, getApp }, authMod] = await Promise.all([
+    import('@firebase/app'),
+    import('@firebase/auth'),
+  ]);
+
   const app = getApps().length > 0 ? getApp() : initializeApp(config);
-  const auth = getAuth(app);
-  const googleProvider = new GoogleAuthProvider();
+  const auth = authMod.getAuth(app);
+  const googleProvider = new authMod.GoogleAuthProvider();
   googleProvider.setCustomParameters({ prompt: 'select_account' });
 
   return {
     auth,
     googleProvider,
-    signInWithPopup,
-    signInWithRedirect,
-    getRedirectResult,
-    signOut,
+    signInWithPopup: authMod.signInWithPopup,
+    signInWithRedirect: authMod.signInWithRedirect,
+    getRedirectResult: authMod.getRedirectResult,
+    signOut: authMod.signOut,
   };
 };
 
 export const signOutFirebaseIfInitialized = async () => {
   try {
+    const [{ getApps, getApp }, { getAuth, signOut }] = await Promise.all([
+      import('@firebase/app'),
+      import('@firebase/auth'),
+    ]);
     if (getApps().length === 0) return;
     const auth = getAuth(getApp());
     await signOut(auth);
@@ -56,4 +55,3 @@ export const signOutFirebaseIfInitialized = async () => {
     // Best-effort Firebase client cleanup during logout
   }
 };
-
