@@ -9,6 +9,7 @@ import {
   isItemParcelEligible,
   resolveItemParcelPricing,
 } from '../utils/parcelHelper.js';
+import { resolveOrderVariantSelection } from '../utils/variantHelper.js';
 import generateOrderCode from '../utils/generateOrderCode.js';
 import {
   createAndEmitNotification,
@@ -67,6 +68,18 @@ export const createWalkInOrder = async (req, res) => {
       .populate('categories', 'name active parcelEligible')
       .lean();
     const dbItemMap = new Map(dbItems.map((item) => [item._id.toString(), item]));
+    const parentIds = dbItems
+      .map((item) => item.variantParent)
+      .filter(Boolean)
+      .map((id) => String(id));
+    const parentDocs =
+      parentIds.length > 0
+        ? await MenuItem.find({ _id: { $in: parentIds } })
+            .populate('category', 'name active parcelEligible')
+            .populate('categories', 'name active parcelEligible')
+            .lean()
+        : [];
+    const parentItemMap = new Map(parentDocs.map((item) => [item._id.toString(), item]));
     const { parcelEnabled, parcelChargePerItem } = await getOrCreateParcelSettings();
 
     let subtotal = 0;
@@ -81,34 +94,49 @@ export const createWalkInOrder = async (req, res) => {
         return res.status(404).json({ success: false, message: `Menu item not found: ${item.name || targetId}` });
       }
 
-      if (!dbItem.available) {
+      const parentDoc = dbItem.variantParent
+        ? parentItemMap.get(String(dbItem.variantParent)) || null
+        : null;
+      const effectiveItem = parentDoc || dbItem;
+
+      if (!effectiveItem.available) {
         return res.status(400).json({
           success: false,
-          message: `"${dbItem.name}" is marked sold out. Please remove or toggle availability.`,
+          message: `"${effectiveItem.name}" is marked sold out. Please remove or toggle availability.`,
         });
       }
+
+      const resolvedVariant = resolveOrderVariantSelection(
+        dbItem,
+        item.variantId || null,
+        parentDoc
+      );
 
       const qty = Math.max(1, parseInt(item.quantity, 10) || 1);
       const pricing = resolveItemParcelPricing({
         rawServiceType: item.serviceType,
         quantity: qty,
-        unitFoodPrice: Number(dbItem.price),
+        unitFoodPrice: resolvedVariant.unitFoodPrice,
         parcelEnabled,
         parcelChargePerItem,
-        itemParcelEligible: isItemParcelEligible(dbItem),
-        itemName: dbItem.name,
+        itemParcelEligible: isItemParcelEligible(resolvedVariant.parentItem),
+        itemName: resolvedVariant.variantLabel
+          ? `${resolvedVariant.displayName} (${resolvedVariant.variantLabel})`
+          : resolvedVariant.displayName,
       });
 
       subtotal += pricing.itemFoodTotal;
       parcelChargeTotal += pricing.parcelChargeTotal;
 
       verifiedItems.push({
-        menuItem: dbItem._id,
-        name: dbItem.name,
-        price: Number(dbItem.price),
+        menuItem: resolvedVariant.parentItem._id,
+        variantId: resolvedVariant.variantId,
+        variantLabel: resolvedVariant.variantLabel,
+        name: resolvedVariant.displayName,
+        price: resolvedVariant.unitFoodPrice,
         quantity: qty,
-        emoji: dbItem.emoji || '🍛',
-        image: dbItem.image?.url || '',
+        emoji: resolvedVariant.parentItem.emoji || '🍛',
+        image: resolvedVariant.imageUrl,
         serviceType: pricing.serviceType,
         parcelChargePerUnit: pricing.parcelChargePerUnit,
         parcelChargeTotal: pricing.parcelChargeTotal,
@@ -150,6 +178,7 @@ export const createWalkInOrder = async (req, res) => {
       paymentMethod,
       paymentStatus: 'paid', // Counter POS sales are collected immediately
       status: 'Completed',
+      statusTimestamps: { Placed: now, Completed: now },
       completedAt: now,
       handoverVerified: true,
       handoverVerifiedAt: now,
@@ -331,11 +360,20 @@ export const verifyAndHandoverOrder = async (req, res) => {
     }
 
     // Update order status to Handover Bill (final collected state)
+    const now = new Date();
     order.status = 'Handover Bill';
-    order.completedAt = new Date();
+    order.completedAt = now;
     order.handoverVerified = true;
-    order.handoverVerifiedAt = new Date();
+    order.handoverVerifiedAt = now;
     order.handoverVerifiedBy = req.user._id;
+    if (!order.statusTimestamps) {
+      order.statusTimestamps = new Map();
+    }
+    if (!order.statusTimestamps.get('Placed') && order.createdAt) {
+      order.statusTimestamps.set('Placed', order.createdAt);
+    }
+    order.statusTimestamps.set('Handover Bill', now);
+    order.statusTimestamps.set('Completed', now);
 
     // Settle unpaid counter COD if applicable
     if (order.paymentStatus === 'cod' || order.paymentStatus === 'pending') {
@@ -362,6 +400,7 @@ export const verifyAndHandoverOrder = async (req, res) => {
           orderId: order._id,
           orderCode: order.orderCode,
           status: 'Handover Bill',
+          statusTimestamps: order.statusTimestamps ? Object.fromEntries(order.statusTimestamps) : undefined,
           paymentStatus: order.paymentStatus,
           order,
         });

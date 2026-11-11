@@ -3,6 +3,7 @@ import MenuItem from '../models/MenuItem.js';
 import Category from '../models/Category.js';
 import { cache } from '../utils/cache.js';
 import { isItemParcelEligible } from '../utils/parcelHelper.js';
+import { parseVariantsInput } from '../utils/variantHelper.js';
 import {
   isCloudinaryConfigured,
   uploadToCloudinary,
@@ -32,6 +33,7 @@ const normalizeMenuItemImage = (item, isList = false) => {
     }
   }
   plain.categories = combined;
+  plain.variants = Array.isArray(plain.variants) ? plain.variants : [];
   return plain;
 };
 
@@ -84,7 +86,9 @@ const getMenuItems = async (req, res) => {
       return res.json(cachedData);
     }
 
-    const andConditions = [];
+    const andConditions = [
+      { $or: [{ variantParent: null }, { variantParent: { $exists: false } }] },
+    ];
     let targetCategoryDoc = null;
 
     if (category && category !== 'all') {
@@ -139,7 +143,7 @@ const getMenuItems = async (req, res) => {
     }
 
     const menuItems = await MenuItem.find(query)
-      .select('name category categories description price image emoji backgroundColor available featured preparationTime adminReviewNote createdAt')
+      .select('name category categories description price image emoji backgroundColor available featured preparationTime adminReviewNote variants variantParent createdAt')
       .populate('category', 'name active parcelEligible')
       .populate('categories', 'name active parcelEligible')
       .sort({ createdAt: -1 })
@@ -159,7 +163,7 @@ const getMenuItems = async (req, res) => {
     res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     res.json(responsePayload);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -179,7 +183,7 @@ const getMenuItemById = async (req, res) => {
     }
 
     const menuItem = await MenuItem.findById(req.params.id)
-      .select('name category categories description price image emoji backgroundColor available featured preparationTime adminReviewNote createdAt')
+      .select('name category categories description price image emoji backgroundColor available featured preparationTime adminReviewNote variants variantParent createdAt')
       .populate('category', 'name active parcelEligible')
       .populate('categories', 'name active parcelEligible')
       .lean();
@@ -193,7 +197,7 @@ const getMenuItemById = async (req, res) => {
 
     res.json(responsePayload);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -213,7 +217,7 @@ const checkMenuItems = async (req, res) => {
     }
 
     const items = await MenuItem.find({ _id: { $in: validIds } })
-      .select('_id name available price category categories')
+      .select('_id name available price variants variantParent category categories')
       .populate('category', 'name active parcelEligible')
       .populate('categories', 'name active parcelEligible')
       .lean();
@@ -223,8 +227,9 @@ const checkMenuItems = async (req, res) => {
       return {
         _id: item._id,
         name: item.name,
-        price: item.price,
         available: categoryInactive ? false : item.available,
+        price: item.price,
+        variants: Array.isArray(item.variants) ? item.variants : [],
         categoryInactive,
         parcelEligible: isItemParcelEligible(item),
       };
@@ -232,7 +237,7 @@ const checkMenuItems = async (req, res) => {
 
     res.json({ success: true, data: checked });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -308,11 +313,16 @@ const createMenuItem = async (req, res) => {
       featured,
       preparationTime,
       adminReviewNote,
+      variants,
       imageUrl,
       imagePublicId,
     } = req.body;
 
-    if (!name || !category || !price) {
+    const parsedVariants = parseVariantsInput(variants, []);
+    const resolvedPrice =
+      parsedVariants && parsedVariants.length > 0 ? Number(parsedVariants[0].price) : Number(price);
+
+    if (!name || !category || (!price && !(parsedVariants && parsedVariants.length > 0))) {
       return res.status(400).json({ success: false, message: 'Please provide name, category, and price' });
     }
 
@@ -378,7 +388,7 @@ const createMenuItem = async (req, res) => {
         category,
         categories: normalizedCatIds,
         description: description ? description.trim() : '',
-        price: Number(price),
+        price: resolvedPrice,
         image: imageData,
         emoji: emoji || '🍛',
         backgroundColor: backgroundColor || '#fff',
@@ -386,6 +396,7 @@ const createMenuItem = async (req, res) => {
         featured: featured === 'true' || featured === true,
         preparationTime: preparationTime ? Number(preparationTime) : 10,
         adminReviewNote: adminReviewNote ? String(adminReviewNote).trim() : '',
+        variants: parsedVariants || [],
       });
     } catch (dbError) {
       // Handle orphan cleanup: if upload succeeded but DB save failed, delete from Cloudinary
@@ -415,7 +426,7 @@ const createMenuItem = async (req, res) => {
       data: normalizedItem,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -442,6 +453,7 @@ const updateMenuItem = async (req, res) => {
       featured,
       preparationTime,
       adminReviewNote,
+      variants,
       imageUrl,
       imagePublicId,
       removeImage,
@@ -525,7 +537,17 @@ const updateMenuItem = async (req, res) => {
 
     if (name !== undefined) menuItem.name = name.trim();
     if (description !== undefined) menuItem.description = description.trim();
-    if (price !== undefined) menuItem.price = Number(price);
+    if (variants !== undefined) {
+      const parsedVariants = parseVariantsInput(variants, menuItem.variants || []);
+      menuItem.variants = parsedVariants;
+      if (parsedVariants.length > 0) {
+        menuItem.price = Number(parsedVariants[0].price);
+      } else if (price !== undefined) {
+        menuItem.price = Number(price);
+      }
+    } else if (price !== undefined) {
+      menuItem.price = Number(price);
+    }
     menuItem.image = imageData;
     if (emoji !== undefined) menuItem.emoji = emoji;
     if (backgroundColor !== undefined) menuItem.backgroundColor = backgroundColor;
@@ -571,7 +593,7 @@ const updateMenuItem = async (req, res) => {
       data: normalizedItem,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -614,7 +636,7 @@ const deleteMenuItem = async (req, res) => {
 
     res.json({ success: true, message: 'Menu item removed successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -659,7 +681,7 @@ const toggleAvailability = async (req, res) => {
       data: normalizedItem,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -723,7 +745,7 @@ const uploadMenuImage = async (req, res) => {
       data: normalizedItem,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -767,7 +789,7 @@ const deleteMenuImage = async (req, res) => {
       data: normalizedItem,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 

@@ -8,6 +8,8 @@ import {
   itemMatchesCategorySearch,
   isItemParcelEligible,
   syncItemCategoryUpdate,
+  getItemVariants,
+  getDefaultVariant,
 } from '../utils/categoryHelpers';
 import { useSocket } from '../context/SocketContext';
 import ThermalReceiptModal from '../components/common/ThermalReceiptModal';
@@ -43,6 +45,7 @@ const POSBilling = () => {
 
   // Billing Cart State
   const [cart, setCart] = useState([]);
+  const [selectedVariants, setSelectedVariants] = useState({});
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'upi'
   const [cashGiven, setCashGiven] = useState('');
@@ -115,15 +118,16 @@ const POSBilling = () => {
         setCart((prev) => {
           const merged = new Map();
           for (const entry of prev) {
-            const existing = merged.get(entry.menuItem);
+            const key = `${entry.menuItem}::${entry.variantId || 'default'}`;
+            const existing = merged.get(key);
             if (existing) {
-              merged.set(entry.menuItem, {
+              merged.set(key, {
                 ...existing,
                 serviceType: 'NORMAL',
                 quantity: existing.quantity + entry.quantity,
               });
             } else {
-              merged.set(entry.menuItem, { ...entry, serviceType: 'NORMAL' });
+              merged.set(key, { ...entry, serviceType: 'NORMAL' });
             }
           }
           return Array.from(merged.values());
@@ -225,10 +229,28 @@ const POSBilling = () => {
     });
   }, [activeMenuItems, selectedCategory, vegOnly, searchQuery]);
 
-  // Cart operations (supports separate NORMAL and PARCEL entries for eligible items; Snacks strictly NORMAL)
-  const addToCart = (item, explicitServiceType = null) => {
-    if (!item.available) {
-      showToast(`"${item.name}" is currently sold out!`, 'error');
+  const getSelectedVariantForItem = (item) => {
+    const variants = getItemVariants(item);
+    if (variants.length === 0) return null;
+    const chosenId = selectedVariants[item._id];
+    return (
+      variants.find((v) => String(v._id) === String(chosenId)) ||
+      getDefaultVariant(item) ||
+      variants[0]
+    );
+  };
+
+  // Cart operations (supports separate variants + NORMAL/PARCEL entries for eligible items; Snacks strictly NORMAL)
+  const addToCart = (item, explicitServiceType = null, explicitVariant = null) => {
+    const variants = getItemVariants(item);
+    const activeVariant =
+      variants.length > 0 ? explicitVariant || getSelectedVariantForItem(item) : null;
+    const activeAvailable =
+      item.available && (activeVariant ? activeVariant.available !== false : true);
+    const labelSuffix = activeVariant ? ` (${activeVariant.label})` : '';
+
+    if (!activeAvailable) {
+      showToast(`"${item.name}${labelSuffix}" is currently sold out!`, 'error');
       return;
     }
 
@@ -239,14 +261,23 @@ const POSBilling = () => {
           ? 'PARCEL'
           : 'NORMAL'
         : 'NORMAL';
+    const variantIdStr = activeVariant?._id ? String(activeVariant._id) : null;
+    const variantLabel = activeVariant?.label || '';
+    const unitPrice = Number(activeVariant ? activeVariant.price : item.price);
+    const itemImage = activeVariant?.image?.url || item.image?.url || '';
 
     setCart((prev) => {
       const existing = prev.find(
-        (i) => i.menuItem === item._id && (i.serviceType || 'NORMAL') === svc
+        (i) =>
+          i.menuItem === item._id &&
+          String(i.variantId || '') === String(variantIdStr || '') &&
+          (i.serviceType || 'NORMAL') === svc
       );
       if (existing) {
         return prev.map((i) =>
-          i.menuItem === item._id && (i.serviceType || 'NORMAL') === svc
+          i.menuItem === item._id &&
+          String(i.variantId || '') === String(variantIdStr || '') &&
+          (i.serviceType || 'NORMAL') === svc
             ? { ...i, quantity: i.quantity + 1, parcelEligible: itemEligible }
             : i
         );
@@ -255,8 +286,10 @@ const POSBilling = () => {
         ...prev,
         {
           menuItem: item._id,
+          variantId: variantIdStr,
+          variantLabel,
           name: item.name,
-          price: Number(item.price),
+          price: unitPrice,
           quantity: 1,
           serviceType: svc,
           parcelEligible: itemEligible,
@@ -264,18 +297,23 @@ const POSBilling = () => {
           categories: item.categories,
           isVeg: item.isVeg,
           emoji: item.emoji || '🍛',
-          image: item.image?.url || '',
+          image: itemImage,
         },
       ];
     });
   };
 
-  const updateQuantity = (menuItemId, delta, serviceType = 'NORMAL') => {
+  const updateQuantity = (menuItemId, delta, serviceType = 'NORMAL', variantId = null) => {
     const targetSvc = parcelSettings.parcelEnabled && serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL';
+    const targetVar = variantId ? String(variantId) : '';
     setCart((prev) =>
       prev
         .map((item) => {
-          if (item.menuItem === menuItemId && (item.serviceType || 'NORMAL') === targetSvc) {
+          if (
+            item.menuItem === menuItemId &&
+            String(item.variantId || '') === targetVar &&
+            (item.serviceType || 'NORMAL') === targetSvc
+          ) {
             const newQty = item.quantity + delta;
             return newQty > 0 ? { ...item, quantity: newQty } : null;
           }
@@ -285,21 +323,24 @@ const POSBilling = () => {
     );
   };
 
-  const changeCartItemServiceType = (menuItemId, fromType, toType) => {
+  const changeCartItemServiceType = (menuItemId, fromType, toType, variantId = null) => {
     if (!parcelSettings.parcelEnabled && toType === 'PARCEL') return;
     if (fromType === toType) return;
+    const targetVar = variantId ? String(variantId) : '';
 
     setCart((prev) => {
       const updated = prev.map((item) => {
         const eligible = item.parcelEligible !== false && isItemParcelEligible(item);
         if (toType === 'PARCEL' && !eligible) return item;
-        return item.menuItem === menuItemId && (item.serviceType || 'NORMAL') === fromType
+        return item.menuItem === menuItemId &&
+          String(item.variantId || '') === targetVar &&
+          (item.serviceType || 'NORMAL') === fromType
           ? { ...item, parcelEligible: eligible, serviceType: toType }
           : item;
       });
       const merged = new Map();
       for (const entry of updated) {
-        const key = `${entry.menuItem}::${entry.serviceType || 'NORMAL'}`;
+        const key = `${entry.menuItem}::${entry.variantId || 'default'}::${entry.serviceType || 'NORMAL'}`;
         if (merged.has(key)) {
           const cur = merged.get(key);
           merged.set(key, { ...cur, quantity: cur.quantity + entry.quantity });
@@ -311,10 +352,18 @@ const POSBilling = () => {
     });
   };
 
-  const removeFromCart = (menuItemId, serviceType = 'NORMAL') => {
+  const removeFromCart = (menuItemId, serviceType = 'NORMAL', variantId = null) => {
     const targetSvc = serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL';
+    const targetVar = variantId ? String(variantId) : '';
     setCart((prev) =>
-      prev.filter((i) => !(i.menuItem === menuItemId && (i.serviceType || 'NORMAL') === targetSvc))
+      prev.filter(
+        (i) =>
+          !(
+            i.menuItem === menuItemId &&
+            String(i.variantId || '') === targetVar &&
+            (i.serviceType || 'NORMAL') === targetSvc
+          )
+      )
     );
   };
 
@@ -371,6 +420,7 @@ const POSBilling = () => {
       const payload = {
         items: cart.map((i) => ({
           menuItem: i.menuItem,
+          variantId: i.variantId || null,
           name: i.name,
           price: i.price,
           quantity: i.quantity,
@@ -646,17 +696,27 @@ const POSBilling = () => {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 xl:grid-cols-4 gap-3 pb-3">
                 {filteredItems.map((item) => {
-                  const normalQty = cart.find((i) => i.menuItem === item._id && (i.serviceType || 'NORMAL') === 'NORMAL')?.quantity || 0;
-                  const parcelQty = cart.find((i) => i.menuItem === item._id && i.serviceType === 'PARCEL')?.quantity || 0;
-                  const totalQtyForItem = normalQty + parcelQty;
+                  const variants = getItemVariants(item);
+                  const hasVariants = variants.length > 0;
+                  const activeVariant = hasVariants ? getSelectedVariantForItem(item) : null;
+                  const displayPrice = activeVariant ? Number(activeVariant.price) : Number(item.price);
+                  const displayImg = activeVariant?.image?.url || item.image?.url || '';
+                  const cardAvailable =
+                    item.available && (activeVariant ? activeVariant.available !== false : true);
+
+                  const itemCartLines = cart.filter((i) => i.menuItem === item._id);
+                  const totalQtyForItem = itemCartLines.reduce((sum, i) => sum + i.quantity, 0);
+                  const parcelQty = itemCartLines
+                    .filter((i) => i.serviceType === 'PARCEL')
+                    .reduce((sum, i) => sum + i.quantity, 0);
                   const isAdded = totalQtyForItem > 0;
 
                   return (
                     <div
                       key={item._id}
-                      onClick={() => item.available && addToCart(item)}
+                      onClick={() => cardAvailable && addToCart(item, null, activeVariant)}
                       className={`group relative bg-white rounded-2xl p-2.5 sm:p-3 border transition-all duration-150 flex flex-col justify-between select-none cursor-pointer ${
-                        !item.available
+                        !cardAvailable
                           ? 'opacity-50 cursor-not-allowed border-stone-200 bg-stone-50'
                           : isAdded
                           ? 'border-[#0b3d2e] shadow-md ring-2 ring-[#0b3d2e]/20'
@@ -664,7 +724,7 @@ const POSBilling = () => {
                       }`}
                     >
                       {/* Top Badges */}
-                      {(isAdded || !item.available) && (
+                      {(isAdded || !cardAvailable) && (
                         <div className="flex items-center justify-end gap-1.5 mb-1.5 flex-wrap">
                           {/* Cart quantity tag if already in cart */}
                           {isAdded && (
@@ -673,7 +733,7 @@ const POSBilling = () => {
                             </span>
                           )}
 
-                          {!item.available && (
+                          {!cardAvailable && (
                             <span className="bg-red-100 text-red-700 text-[9px] font-bold px-1.5 py-0.5 rounded">
                               Sold Out
                             </span>
@@ -683,10 +743,10 @@ const POSBilling = () => {
 
                       {/* Food Image / Emoji */}
                       <div className="w-full aspect-[4/3] rounded-xl overflow-hidden bg-stone-100 mb-2 flex items-center justify-center">
-                        {item.image?.url ? (
+                        {displayImg ? (
                           <img
-                            src={item.image.url}
-                            alt={item.name}
+                            src={displayImg}
+                            alt={activeVariant ? `${item.name} (${activeVariant.label})` : item.name}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                             loading="lazy"
                           />
@@ -700,21 +760,52 @@ const POSBilling = () => {
                         <h4 className="font-outfit font-bold text-xs sm:text-sm text-stone-900 leading-snug line-clamp-2">
                           {item.name}
                         </h4>
-                        
+
+                        {hasVariants && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex flex-wrap gap-1 mt-1.5"
+                          >
+                            {variants.map((variant) => {
+                              const isSelected = String(variant._id) === String(activeVariant?._id);
+                              return (
+                                <button
+                                  key={variant._id}
+                                  type="button"
+                                  data-testid={`pos-variant-${item._id}-${variant._id}`}
+                                  onClick={() =>
+                                    setSelectedVariants((prev) => ({
+                                      ...prev,
+                                      [item._id]: String(variant._id),
+                                    }))
+                                  }
+                                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold border transition ${
+                                    isSelected
+                                      ? 'bg-[#0b3d2e] text-white border-[#0b3d2e]'
+                                      : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-[#0b3d2e]/50'
+                                  }`}
+                                >
+                                  {variant.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
                         <div className="flex items-center justify-between mt-2 pt-1 border-t border-stone-100">
                           <span className="font-outfit font-black text-sm text-[#0b3d2e]">
-                            ₹{Number(item.price).toFixed(2)}
+                            ₹{displayPrice.toFixed(2)}
                           </span>
 
                           <button
                             type="button"
-                            disabled={!item.available}
+                            disabled={!cardAvailable}
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (item.available) addToCart(item);
+                              if (cardAvailable) addToCart(item, null, activeVariant);
                             }}
                             className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black transition-all ${
-                              !item.available
+                              !cardAvailable
                                 ? 'bg-stone-200 text-stone-400'
                                 : 'bg-amber text-stone-950 hover:bg-amber-dark active:scale-90 shadow-2xs'
                             }`}
@@ -788,9 +879,11 @@ const POSBilling = () => {
                   const itemParcelTotal = Number((perUnitParcel * item.quantity).toFixed(2));
                   const itemLineTotal = Number((item.price * item.quantity + itemParcelTotal).toFixed(2));
 
+                  const variantIdAttr = item.variantId ? String(item.variantId) : 'default';
+
                   return (
                     <div
-                      key={`${item.menuItem}::${svcType}`}
+                      key={`${item.menuItem}::${variantIdAttr}::${svcType}`}
                       className="pt-2 first:pt-0 flex items-start justify-between gap-2"
                     >
                       <div className="flex-1 min-w-0">
@@ -799,6 +892,11 @@ const POSBilling = () => {
                           <h4 className="font-bold text-xs text-stone-900 truncate">
                             {item.name}
                           </h4>
+                          {item.variantLabel && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-stone-100 text-stone-700 border border-stone-200">
+                              {item.variantLabel}
+                            </span>
+                          )}
                           <span
                             className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded ${
                               isParcel
@@ -821,7 +919,7 @@ const POSBilling = () => {
                           <div className="inline-flex items-center gap-1 bg-stone-100 rounded-lg p-0.5 ml-3.5 mt-1">
                             <button
                               type="button"
-                              onClick={() => changeCartItemServiceType(item.menuItem, svcType, 'NORMAL')}
+                              onClick={() => changeCartItemServiceType(item.menuItem, svcType, 'NORMAL', item.variantId || null)}
                               className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition ${
                                 !isParcel
                                   ? 'bg-[#0b3d2e] text-white shadow-2xs'
@@ -832,7 +930,7 @@ const POSBilling = () => {
                             </button>
                             <button
                               type="button"
-                              onClick={() => changeCartItemServiceType(item.menuItem, svcType, 'PARCEL')}
+                              onClick={() => changeCartItemServiceType(item.menuItem, svcType, 'PARCEL', item.variantId || null)}
                               className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition ${
                                 isParcel
                                   ? 'bg-amber text-stone-950 font-black shadow-2xs'
@@ -849,7 +947,7 @@ const POSBilling = () => {
                       <div className="flex items-center gap-1.5 bg-stone-100 p-1 rounded-xl shrink-0">
                         <button
                           type="button"
-                          onClick={() => updateQuantity(item.menuItem, -1, svcType)}
+                          onClick={() => updateQuantity(item.menuItem, -1, svcType, item.variantId || null)}
                           className="w-5 h-5 rounded bg-white text-stone-700 flex items-center justify-center hover:bg-stone-200 transition shadow-2xs"
                           title="Decrease quantity"
                         >
@@ -860,7 +958,7 @@ const POSBilling = () => {
                         </span>
                         <button
                           type="button"
-                          onClick={() => updateQuantity(item.menuItem, 1, svcType)}
+                          onClick={() => updateQuantity(item.menuItem, 1, svcType, item.variantId || null)}
                           className="w-5 h-5 rounded bg-white text-stone-700 flex items-center justify-center hover:bg-stone-200 transition shadow-2xs"
                           title="Increase quantity"
                         >
@@ -878,7 +976,7 @@ const POSBilling = () => {
                       {/* Remove button */}
                       <button
                         type="button"
-                        onClick={() => removeFromCart(item.menuItem, svcType)}
+                        onClick={() => removeFromCart(item.menuItem, svcType, item.variantId || null)}
                         className="text-stone-400 hover:text-red-500 p-1 transition shrink-0"
                         title="Remove item from cart"
                       >

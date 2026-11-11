@@ -415,30 +415,32 @@ const Profile = () => {
           <form onSubmit={handlePasswordUpdate} className="flex flex-col gap-5 flex-1 justify-between">
             <div className="flex flex-col gap-4">
               
-              {/* Current Password */}
-              <div>
-                <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">
-                  Current Password
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-gray-400 pointer-events-none" />
-                  <input
-                    type={showOldPw ? 'text' : 'password'}
-                    required
-                    value={oldPassword}
-                    onChange={(e) => setOldPassword(e.target.value)}
-                    placeholder="Enter current password"
-                    className="w-full h-12 bg-cream/60 focus:bg-white border border-border focus:border-primary focus:ring-2 focus:ring-primary/10 rounded-xl pl-11 pr-11 text-sm font-medium focus:outline-none transition-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowOldPw(!showOldPw)}
-                    className="absolute right-3.5 top-3.5 text-gray-400 hover:text-primary-dark focus:outline-none transition-colors"
-                  >
-                    {showOldPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+              {/* Current Password (only required if account already has a local password) */}
+              {user?.hasPassword !== false && (
+                <div>
+                  <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                    Current Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-gray-400 pointer-events-none" />
+                    <input
+                      type={showOldPw ? 'text' : 'password'}
+                      required
+                      value={oldPassword}
+                      onChange={(e) => setOldPassword(e.target.value)}
+                      placeholder="Enter current password"
+                      className="w-full h-12 bg-cream/60 focus:bg-white border border-border focus:border-primary focus:ring-2 focus:ring-primary/10 rounded-xl pl-11 pr-11 text-sm font-medium focus:outline-none transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowOldPw(!showOldPw)}
+                      className="absolute right-3.5 top-3.5 text-gray-400 hover:text-primary-dark focus:outline-none transition-colors"
+                    >
+                      {showOldPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* New Password */}
               <div>

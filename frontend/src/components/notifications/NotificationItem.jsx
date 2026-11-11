@@ -1,6 +1,17 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, Trash2, ArrowUpRight, Clock, AlertCircle } from 'lucide-react';
+import {
+  Check,
+  Trash2,
+  ArrowUpRight,
+  Clock,
+  AlertCircle,
+  Bell,
+  CheckCircle2,
+  Utensils,
+  ShieldCheck,
+  Receipt,
+} from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useAuth } from '../../context/AuthContext';
 
@@ -26,19 +37,18 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
   const isUnread = !notification.read;
   const isHighPriority = notification.priority === 'HIGH';
   const orderCode = notification.metadata?.orderCode || notification.order?.orderCode;
-  const pickupToken = notification.metadata?.pickupToken || orderCode;
+  const pickupToken = notification.metadata?.pickupToken;
+  const notifId = notification._id || notification.id;
 
   const isAdmin = user?.role === 'admin' || window.location.pathname.startsWith('/admin');
 
   const handleClick = () => {
-    if (isUnread) {
-      markAsRead(notification._id);
+    if (isUnread && notifId) {
+      markAsRead(notifId);
     }
     if (onCloseDropdown) onCloseDropdown();
 
     if (isAdmin) {
-      // Admin notification click:
-      // Do NOT redirect admin to food tracking (/tracker/:code), Live Queue, or Handover
       const adminLink = notification.metadata?.link;
       if (
         adminLink &&
@@ -48,10 +58,9 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
       ) {
         navigate(adminLink);
       }
-      // If no appropriate admin link, simply mark as read without navigating
     } else {
-      // Student / Customer notification click: navigate to their order tracking page
-      const customerLink = notification.metadata?.link || (orderCode ? `/tracker/${orderCode}` : '/pickup');
+      const customerLink =
+        notification.metadata?.link || (orderCode ? `/tracker/${orderCode}` : '/pickup');
       if (customerLink) {
         navigate(customerLink);
       }
@@ -60,81 +69,102 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
 
   const handleMarkRead = (e) => {
     e.stopPropagation();
-    markAsRead(notification._id);
+    if (notifId) markAsRead(notifId);
   };
 
   const handleDelete = (e) => {
     e.stopPropagation();
-    deleteNotification(notification._id);
+    if (notifId) deleteNotification(notifId);
   };
 
-  const getIconBackground = () => {
+  const getIconConfig = () => {
     switch (notification.type) {
       case 'ORDER_READY':
-        return 'bg-green-100 text-green-700 border-green-300';
-      case 'ORDER_PREPARING':
-        return 'bg-amber-100 text-amber-700 border-amber-300';
-      case 'ORDER_CONFIRMED':
-        return 'bg-blue-100 text-blue-700 border-blue-300';
-      case 'ORDER_PLACED':
-        return 'bg-rose-100 text-rose-700 border-rose-300';
-      case 'ORDER_CANCELLED':
-        return 'bg-red-100 text-red-700 border-red-300';
       case 'ORDER_COMPLETED':
-        return 'bg-gray-100 text-gray-700 border-gray-300';
+        return {
+          bg: 'bg-green-100 text-green-700 border-green-300',
+          Icon: CheckCircle2,
+        };
+      case 'ORDER_PREPARING':
+        return {
+          bg: 'bg-amber-100 text-amber-700 border-amber-300',
+          Icon: Utensils,
+        };
+      case 'ORDER_CONFIRMED':
+        return {
+          bg: 'bg-blue-100 text-blue-700 border-blue-300',
+          Icon: ShieldCheck,
+        };
+      case 'ORDER_PLACED':
+        return {
+          bg: 'bg-primary-light text-primary-dark border-primary/25',
+          Icon: Receipt,
+        };
+      case 'ORDER_CANCELLED':
+        return {
+          bg: 'bg-red-100 text-red-700 border-red-300',
+          Icon: AlertCircle,
+        };
       default:
-        return 'bg-amber-50 text-amber-600 border-amber-200';
+        return {
+          bg: 'bg-amber-50 text-amber-700 border-amber-200',
+          Icon: Bell,
+        };
     }
   };
 
+  const { bg, Icon } = getIconConfig();
+
   return (
     <div
+      data-testid={`notification-item-${notifId}`}
       onClick={handleClick}
-      className={`group relative p-3.5 sm:p-4 rounded-2xl border transition-all duration-200 cursor-pointer flex gap-3.5 ${
+      className={`group relative p-2.5 sm:p-3 rounded-xl border transition-all duration-150 cursor-pointer flex gap-2.5 sm:gap-3 min-w-0 ${
         isUnread
-          ? 'bg-amber-light/25 hover:bg-amber-light/40 border-amber/30 shadow-xs'
-          : 'bg-white hover:bg-gray-50/80 border-gray-100'
-      } ${isHighPriority && isUnread ? 'ring-1 ring-green-500/40' : ''}`}
+          ? 'bg-amber-light/25 hover:bg-amber-light/40 border-amber/35 shadow-xs'
+          : 'bg-white hover:bg-gray-50 border-gray-100'
+      } ${isHighPriority && isUnread ? 'ring-1 ring-green-500/35' : ''}`}
     >
-      {/* Icon */}
+      {/* Left Status Icon */}
       <div
-        className={`w-10 h-10 rounded-xl border flex items-center justify-center text-lg flex-shrink-0 shadow-xs ${getIconBackground()}`}
+        className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 ${bg}`}
       >
-        {notification.icon || '🔔'}
+        <Icon className="w-4 h-4" />
       </div>
 
-      {/* Content */}
+      {/* Body */}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
           <h4
-            className={`text-xs font-bold leading-tight line-clamp-1 ${
+            className={`text-xs leading-snug line-clamp-1 min-w-0 flex-1 ${
               isUnread ? 'text-primary-dark font-extrabold' : 'text-gray-700 font-semibold'
             }`}
           >
             {notification.title}
           </h4>
 
-          <span className="text-[10px] text-gray-400 whitespace-nowrap flex items-center gap-1">
+          <span className="text-[10px] text-gray-400 whitespace-nowrap flex items-center gap-1 shrink-0">
             <Clock className="w-2.5 h-2.5 text-gray-300" />
-            {formatTimeAgo(notification.createdAt)}
+            <span>{formatTimeAgo(notification.createdAt)}</span>
+            {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-amber inline-block ml-0.5" />}
           </span>
         </div>
 
-        <p className="text-xs text-gray-600 mt-1 leading-snug line-clamp-2">
+        <p className="text-[11px] sm:text-xs text-gray-600 mt-0.5 leading-snug line-clamp-2 break-words">
           {notification.message}
         </p>
 
-        {/* Order code link & Action buttons */}
-        <div className="flex items-center justify-between mt-2.5 pt-1.5 border-t border-gray-100/70">
+        {/* Bottom Order Link, Token Badge & Actions */}
+        <div className="flex flex-wrap items-center justify-between gap-1.5 mt-2 pt-1.5 border-t border-gray-100/80 min-w-0">
           {orderCode ? (
-            <div className="flex items-center gap-1.5">
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:text-primary-dark transition-colors">
-                <span>Pickup / Track #{orderCode}</span>
-                <ArrowUpRight className="w-3 h-3" />
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
+              <span className="inline-flex items-center gap-0.5 text-[11px] font-bold text-primary hover:text-primary-dark truncate max-w-full">
+                <span className="truncate">Pickup / Track #{orderCode}</span>
+                <ArrowUpRight className="w-3 h-3 shrink-0" />
               </span>
-              {notification.metadata?.pickupToken && (
-                <span className="text-[10px] font-mono font-black text-amber-900 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded">
-                  Token #{notification.metadata.pickupToken}
+              {pickupToken && (
+                <span className="text-[10px] font-mono font-bold text-amber-900 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded leading-none whitespace-nowrap shrink-0">
+                  Token #{pickupToken}
                 </span>
               )}
             </div>
@@ -142,11 +172,13 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
             <span />
           )}
 
-          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 shrink-0 ml-auto">
             {isUnread && (
               <button
+                type="button"
                 onClick={handleMarkRead}
                 title="Mark as read"
+                aria-label="Mark notification as read"
                 className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
               >
                 <Check className="w-3.5 h-3.5" />
@@ -154,8 +186,10 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
             )}
 
             <button
+              type="button"
               onClick={handleDelete}
               title="Delete notification"
+              aria-label="Delete notification"
               className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -163,11 +197,6 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
           </div>
         </div>
       </div>
-
-      {/* Unread Accent Dot */}
-      {isUnread && (
-        <span className="absolute top-3 right-3 w-2 h-2 rounded-full bg-amber shadow-xs" />
-      )}
     </div>
   );
 };

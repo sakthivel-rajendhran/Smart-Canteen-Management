@@ -416,20 +416,43 @@ const Menu = () => {
         ) : (
           /* Food Grid */
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {filteredItems.map((item) => (
-              <FoodCard
-                key={item._id}
-                item={item}
-                quantity={getQtyInCart(item._id)}
-                normalQty={getItemQuantity(item._id, 'NORMAL')}
-                parcelQty={getItemQuantity(item._id, 'PARCEL')}
-                parcelEnabled={parcelEnabled}
-                parcelChargePerItem={parcelChargePerItem}
-                onAdd={(itemToAdd, svc = 'NORMAL') => addToCart(itemToAdd, 1, svc)}
-                onChangeQty={(id, delta, svc = 'NORMAL') => changeQuantity(id, delta, svc)}
-                onOpenDetail={(itemToOpen) => setSelectedFood(itemToOpen)}
-              />
-            ))}
+            {filteredItems.map((item) => {
+              const hasVariants = Array.isArray(item.variants) && item.variants.length > 0;
+              const variantLines = hasVariants
+                ? cart.filter((c) => c.menuItem === item._id && c.quantity > 0)
+                : [];
+              const variantTraySummary =
+                variantLines.length > 0
+                  ? `In tray: ${variantLines
+                      .map((c) => `${c.variantLabel || 'Standard'} (${c.quantity})`)
+                      .join(' · ')}`
+                  : null;
+
+              return (
+                <FoodCard
+                  key={item._id}
+                  item={item}
+                  quantity={getQtyInCart(item._id)}
+                  normalQty={getItemQuantity(item._id, 'NORMAL')}
+                  parcelQty={getItemQuantity(item._id, 'PARCEL')}
+                  getVariantQty={(svc, variantId) =>
+                    getItemQuantity(item._id, svc, variantId || null)
+                  }
+                  cartSummary={variantTraySummary}
+                  parcelEnabled={parcelEnabled}
+                  parcelChargePerItem={parcelChargePerItem}
+                  onAdd={(itemToAdd, svc = 'NORMAL', variant = null) =>
+                    addToCart(itemToAdd, 1, svc, variant)
+                  }
+                  onChangeQty={(id, delta, svc = 'NORMAL', variantId = null) =>
+                    changeQuantity(id, delta, svc, variantId)
+                  }
+                  onOpenDetail={(itemToOpen, variantId = null) =>
+                    setSelectedFood({ ...itemToOpen, _initialVariantId: variantId })
+                  }
+                />
+              );
+            })}
           </div>
         )}
       </div>
@@ -472,9 +495,12 @@ const Menu = () => {
         isOpen={Boolean(selectedFood)}
         onClose={() => setSelectedFood(null)}
         initialQty={1}
+        initialVariantId={selectedFood?._initialVariantId || null}
         parcelEnabled={parcelEnabled}
         parcelChargePerItem={parcelChargePerItem}
-        onAddToCart={(item, qty, svc = 'NORMAL') => addToCart(item, qty, svc)}
+        onAddToCart={(item, qty, svc = 'NORMAL', variant = null) =>
+          addToCart(item, qty, svc, variant)
+        }
       />
     </div>
   );

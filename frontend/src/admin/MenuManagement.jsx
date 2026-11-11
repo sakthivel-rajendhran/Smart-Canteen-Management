@@ -72,6 +72,7 @@ const MenuManagement = () => {
   const [formImageFile, setFormImageFile] = useState(null);
   const [formImagePreview, setFormImagePreview] = useState(null);
   const [formRemoveImage, setFormRemoveImage] = useState(false);
+  const [formVariants, setFormVariants] = useState([]);
   const [formValidationMsg, setFormValidationMsg] = useState('');
   const [formLoading, setFormLoading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState('');
@@ -251,6 +252,7 @@ const MenuManagement = () => {
     setFormImageFile(null);
     setFormImagePreview(null);
     setFormRemoveImage(false);
+    setFormVariants([]);
     setUploadProgressText('');
     setFormValidationMsg('');
   };
@@ -279,6 +281,19 @@ const MenuManagement = () => {
     setFormAvailable(item.available !== false);
     setFormImageFile(null);
     setFormRemoveImage(false);
+    setFormVariants(
+      Array.isArray(item.variants)
+        ? item.variants.map((v) => ({
+            _id: v._id,
+            label: v.label || '',
+            price: v.price ?? '',
+            available: v.available !== false,
+            preparationTime: v.preparationTime ?? item.preparationTime ?? 5,
+            image: v.image,
+            legacyMenuItemId: v.legacyMenuItemId || null,
+          }))
+        : []
+    );
     setUploadProgressText('');
     setFormImagePreview(item.image?.url || (typeof item.image === 'string' ? item.image : '') || null);
     setFormValidationMsg('');
@@ -309,6 +324,9 @@ const MenuManagement = () => {
       formData.append('preparationTime', formPreparationTime);
       formData.append('featured', formFeatured);
       formData.append('available', formAvailable);
+      if (formVariants.length > 0) {
+        formData.append('variants', JSON.stringify(formVariants));
+      }
 
       if (formImageFile) {
         formData.append('image', formImageFile);
@@ -350,6 +368,9 @@ const MenuManagement = () => {
       formData.append('preparationTime', formPreparationTime);
       formData.append('featured', formFeatured);
       formData.append('available', formAvailable);
+      if (formVariants.length > 0) {
+        formData.append('variants', JSON.stringify(formVariants));
+      }
 
       if (formImageFile) {
         formData.append('image', formImageFile);
@@ -781,6 +802,22 @@ const MenuManagement = () => {
                             <span className="text-[10px] text-muted block leading-none font-medium truncate max-w-[240px] mt-0.5">
                               {item.description || 'No description provided.'}
                             </span>
+                            {Array.isArray(item.variants) && item.variants.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                {item.variants.map((v) => (
+                                  <span
+                                    key={v._id || v.label}
+                                    className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
+                                      v.available === false
+                                        ? 'bg-gray-50 text-gray-400 border-gray-200 line-through'
+                                        : 'bg-cream text-primary-dark border-border'
+                                    }`}
+                                  >
+                                    {v.label}: ₹{v.price}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -806,7 +843,14 @@ const MenuManagement = () => {
 
                       {/* Price */}
                       <td className="py-3.5 px-4 text-center font-outfit font-black text-sm text-primary-dark">
-                        ₹{item.price}
+                        {Array.isArray(item.variants) && item.variants.length > 0 ? (
+                          <div className="text-xs leading-tight">
+                            ₹{Math.min(...item.variants.map((v) => Number(v.price)))}–₹
+                            {Math.max(...item.variants.map((v) => Number(v.price)))}
+                          </div>
+                        ) : (
+                          <>₹{item.price}</>
+                        )}
                       </td>
 
                       {/* Prep Time */}
@@ -1378,6 +1422,78 @@ const MenuManagement = () => {
                   className="w-full bg-cream border border-border focus:border-primary focus:bg-white rounded-xl py-2 px-3.5 text-xs focus:outline-none transition-all resize-none"
                 />
               </div>
+
+              {formVariants.length > 0 && (
+                <div className="bg-cream/60 border border-border rounded-2xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-extrabold text-muted uppercase tracking-wider">
+                      Pack Size Variants
+                    </span>
+                    <span className="text-[10px] font-semibold text-primary">
+                      {formVariants.length} sizes configured
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {formVariants.map((variant, vIdx) => (
+                      <div
+                        key={variant._id || vIdx}
+                        className="flex flex-wrap sm:flex-nowrap items-center gap-2 bg-white border border-border rounded-xl p-2"
+                      >
+                        <input
+                          type="text"
+                          required
+                          value={variant.label}
+                          onChange={(e) =>
+                            setFormVariants((prev) =>
+                              prev.map((row, idx) =>
+                                idx === vIdx ? { ...row, label: e.target.value } : row
+                              )
+                            )
+                          }
+                          placeholder="Size label"
+                          className="flex-1 min-w-[90px] bg-cream border border-border rounded-lg py-1.5 px-2.5 text-xs font-semibold text-primary-dark focus:outline-none focus:border-primary"
+                        />
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-bold text-muted">₹</span>
+                          <input
+                            type="number"
+                            required
+                            min="0"
+                            step="0.01"
+                            value={variant.price}
+                            onChange={(e) => {
+                              const nextPrice = e.target.value;
+                              setFormVariants((prev) => {
+                                const updated = prev.map((row, idx) =>
+                                  idx === vIdx ? { ...row, price: nextPrice } : row
+                                );
+                                if (vIdx === 0) setFormPrice(nextPrice);
+                                return updated;
+                              });
+                            }}
+                            className="w-20 bg-cream border border-border rounded-lg py-1.5 px-2 text-xs font-bold text-primary-dark focus:outline-none focus:border-primary"
+                          />
+                        </div>
+                        <label className="flex items-center gap-1.5 text-[11px] font-bold text-primary-dark px-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={variant.available !== false}
+                            onChange={(e) =>
+                              setFormVariants((prev) =>
+                                prev.map((row, idx) =>
+                                  idx === vIdx ? { ...row, available: e.target.checked } : row
+                                )
+                              )
+                            }
+                            className="accent-primary w-3.5 h-3.5"
+                          />
+                          <span>Available</span>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-3 gap-3">
                 <div>

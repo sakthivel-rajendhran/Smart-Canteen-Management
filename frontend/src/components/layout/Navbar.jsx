@@ -480,7 +480,7 @@ const Navbar = () => {
 
       {/* Customer Mobile Bottom Navigation: Visible ONLY when authenticated (Hidden on public landing page & admin) */}
       {Boolean(user && user.role !== 'admin' && user.role !== 'ADMIN') && (
-        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#072419] border-t-2 border-amber/40 z-50 min-h-[68px] pb-[calc(6px+env(safe-area-inset-bottom,0px))] pt-1.5 px-1 shadow-[0_-8px_25px_rgba(0,0,0,0.6)] flex items-center justify-around select-none">
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#072419] border-t-2 border-amber/40 z-40 min-h-[68px] pb-[calc(6px+env(safe-area-inset-bottom,0px))] pt-1.5 px-1 shadow-[0_-8px_25px_rgba(0,0,0,0.6)] flex items-center justify-around select-none">
           {studentNavItems.map((item) => {
             const active = isActive(item.path);
             return (

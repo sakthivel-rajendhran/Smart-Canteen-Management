@@ -1,24 +1,142 @@
 import User from '../models/User.js';
 import generateToken from '../utils/generateToken.js';
+import {
+  getFirebaseConfig,
+  verifyFirebaseIdToken,
+  getGoogleConfig,
+  verifyGoogleIdToken,
+  createGoogleOAuthStateUrl,
+  verifyGoogleOAuthState,
+  exchangeCodeForVerifiedGoogleProfile,
+  createOneTimeExchangeToken,
+  consumeOneTimeExchangeToken,
+} from '../utils/googleAuth.js';
 
-// @desc    Register a new user (Student or College Staff)
+const resolveAccountType = (user) =>
+  user.accountType ||
+  (user.role === 'admin' || user.role === 'ADMIN'
+    ? 'ADMIN'
+    : user.role === 'STAFF'
+    ? 'STAFF'
+    : 'STUDENT');
+
+const buildAuthPayload = (user, token = null) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  accountType: resolveAccountType(user),
+  phone: user.phone || '',
+  avatar: user.avatar || '',
+  authProvider: user.authProvider || (user.googleId || user.firebaseUid ? 'google' : 'local'),
+  hasPassword: Boolean(user.password),
+  studentDetails: user.studentDetails,
+  staffDetails: user.staffDetails,
+  ...(token ? { token } : {}),
+});
+
+const getClientBaseUrl = () => {
+  const url = String(process.env.CLIENT_URL || 'http://localhost:5173').trim();
+  return url.replace(/\/+$/, '');
+};
+
+const resolveOrCreateGoogleUser = async (profile) => {
+  const cleanEmail = String(profile.email || '').trim().toLowerCase();
+  const firebaseUid = profile.firebaseUid ? String(profile.firebaseUid).trim() : '';
+  const googleId = profile.googleId ? String(profile.googleId).trim() : '';
+
+  if (!cleanEmail || (!firebaseUid && !googleId)) {
+    const err = new Error('Google profile did not provide a verified email and identity.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const orConditions = [{ email: cleanEmail }];
+  if (firebaseUid) orConditions.push({ firebaseUid });
+  if (googleId) orConditions.push({ googleId });
+
+  let user = await User.findOne({ $or: orConditions });
+
+  if (user) {
+    if (user.isActive === false) {
+      const err = new Error('Your account has been disabled. Please contact canteen admin.');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (firebaseUid && user.firebaseUid && user.firebaseUid !== firebaseUid) {
+      const err = new Error('This email address is already linked to a different Firebase user.');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    if (googleId && user.googleId && user.googleId !== googleId) {
+      const err = new Error('This email address is already linked to a different Google account.');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const matchedPreviouslyLinked =
+      (firebaseUid && user.firebaseUid === firebaseUid) || (googleId && user.googleId === googleId);
+    if ((user.role === 'admin' || user.role === 'ADMIN') && !matchedPreviouslyLinked) {
+      const err = new Error('Administrator accounts must sign in with their email and password.');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    let modified = false;
+    if (firebaseUid && !user.firebaseUid) {
+      user.firebaseUid = firebaseUid;
+      user.authProvider = user.password ? 'hybrid' : 'google';
+      modified = true;
+    }
+    if (googleId && !user.googleId) {
+      user.googleId = googleId;
+      user.authProvider = user.password ? 'hybrid' : 'google';
+      modified = true;
+    }
+    if (!user.emailVerified) {
+      user.emailVerified = true;
+      modified = true;
+    }
+    if (!user.avatar && profile.picture) {
+      user.avatar = profile.picture;
+      modified = true;
+    }
+
+    if (modified) {
+      await user.save();
+    }
+
+    return { user, isNewUser: false };
+  }
+
+  // Strictly assign normal customer role ('STUDENT') on new Google sign-ups
+  user = await User.create({
+    name: profile.name || cleanEmail.split('@')[0],
+    email: cleanEmail,
+    ...(firebaseUid ? { firebaseUid } : {}),
+    ...(googleId ? { googleId } : {}),
+    authProvider: 'google',
+    emailVerified: true,
+    avatar: profile.picture || '',
+    role: 'STUDENT',
+    accountType: 'STUDENT',
+  });
+
+  return { user, isNewUser: true };
+};
+
+// @desc    Register a new customer user
 // @route   POST /api/auth/register
 // @access  Public
 const registerUser = async (req, res) => {
   try {
-    const {
-      name,
-      email,
-      password,
-      phone,
-      accountType,
-      studentDetails,
-      staffDetails,
-    } = req.body;
+    const { name, email, password, phone } = req.body;
 
-    if (!name || !email || !password) {
+    if (!name || !String(name).trim() || !email || !password) {
       res.status(400);
-      throw new Error('Please fill all required fields');
+      throw new Error('Please fill in your full name, email address, and password');
     }
 
     const cleanEmail = String(email).trim().toLowerCase();
@@ -39,52 +157,22 @@ const registerUser = async (req, res) => {
       throw new Error('User already exists with this email');
     }
 
-    // STRICT SECURITY: Public registration can ONLY create STUDENT or STAFF accounts
-    // Admin accounts can NEVER be created through public registration
-    const targetAccountType = accountType === 'STAFF' ? 'STAFF' : 'STUDENT';
-    const targetRole = targetAccountType;
-
-    const userData = {
+    // Strictly assign normal customer role; Admin/Employee cannot be created via public signup
+    const user = await User.create({
       name: String(name).trim(),
       email: cleanEmail,
       password,
       phone: phone ? String(phone).replace(/\D/g, '') : '',
-      role: targetRole,
-      accountType: targetAccountType,
-    };
-
-    if (targetAccountType === 'STUDENT') {
-      userData.studentDetails = {
-        registerNumber: studentDetails?.registerNumber ? String(studentDetails.registerNumber).trim() : '',
-        department: studentDetails?.department ? String(studentDetails.department).trim() : '',
-        year: studentDetails?.year ? String(studentDetails.year).trim() : '',
-      };
-      userData.staffDetails = null;
-    } else {
-      userData.staffDetails = {
-        staffId: staffDetails?.staffId ? String(staffDetails.staffId).trim() : '',
-        department: staffDetails?.department ? String(staffDetails.department).trim() : '',
-      };
-      userData.studentDetails = null;
-    }
-
-    const user = await User.create(userData);
+      role: 'STUDENT',
+      accountType: 'STUDENT',
+      authProvider: 'local',
+    });
 
     if (user) {
       res.status(201).json({
         success: true,
-        message: `${targetAccountType === 'STAFF' ? 'College Staff' : 'Student'} registration successful`,
-        data: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          accountType: user.accountType,
-          phone: user.phone,
-          studentDetails: user.studentDetails,
-          staffDetails: user.staffDetails,
-          token: generateToken(user._id),
-        },
+        message: 'Account created successfully',
+        data: buildAuthPayload(user, generateToken(user._id)),
       });
     } else {
       res.status(400);
@@ -111,30 +199,21 @@ const loginUser = async (req, res) => {
     const cleanEmail = String(email).trim().toLowerCase();
     const user = await User.findOne({ email: cleanEmail });
 
+    if (user && !user.password) {
+      res.status(401);
+      throw new Error('This account uses Google Sign-In. Please click "Continue with Google".');
+    }
+
     if (user && (await user.matchPassword(password))) {
-      // Safe fallback account type for existing accounts
-      const resolvedAccountType =
-        user.accountType ||
-        (user.role === 'admin' || user.role === 'ADMIN'
-          ? 'ADMIN'
-          : user.role === 'STAFF'
-          ? 'STAFF'
-          : 'STUDENT');
+      if (user.isActive === false) {
+        res.status(403);
+        throw new Error('Your account has been disabled.');
+      }
 
       res.json({
         success: true,
         message: 'Login successful',
-        data: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          accountType: resolvedAccountType,
-          phone: user.phone,
-          studentDetails: user.studentDetails,
-          staffDetails: user.staffDetails,
-          token: generateToken(user._id),
-        },
+        data: buildAuthPayload(user, generateToken(user._id)),
       });
     } else {
       res.status(401);
@@ -146,17 +225,132 @@ const loginUser = async (req, res) => {
   }
 };
 
+// @desc    Get non-secret Firebase / Google OAuth configuration status
+// @route   GET /api/auth/google/config
+// @access  Public
+const getGoogleAuthConfig = async (req, res) => {
+  const fb = getFirebaseConfig();
+  const { configured, clientId, oauthCodeFlow } = getGoogleConfig(req);
+  res.json({
+    success: true,
+    data: {
+      provider: fb.configured ? 'firebase' : configured ? 'google-oidc' : 'none',
+      configured: fb.configured || configured,
+      firebaseConfigured: fb.configured,
+      firebase: fb.clientConfig,
+      clientId,
+      oauthCodeFlow,
+    },
+  });
+};
+
+// @desc    Verify Firebase Google ID token (or Google OIDC credential / code) & login/register customer
+// @route   POST /api/auth/google | POST /api/auth/firebase-google
+// @access  Public
+const googleAuthLogin = async (req, res) => {
+  try {
+    const { firebaseIdToken, credential, code } = req.body || {};
+
+    let verifiedProfile;
+    if (firebaseIdToken) {
+      verifiedProfile = await verifyFirebaseIdToken(firebaseIdToken);
+    } else if (credential) {
+      verifiedProfile = await verifyGoogleIdToken(credential);
+    } else if (code) {
+      verifiedProfile = await exchangeCodeForVerifiedGoogleProfile(code, req);
+    } else {
+      res.status(400);
+      throw new Error('Firebase Google ID token or Google credential is required.');
+    }
+
+    const { user, isNewUser } = await resolveOrCreateGoogleUser(verifiedProfile);
+
+    res.status(isNewUser ? 201 : 200).json({
+      success: true,
+      message: isNewUser ? 'Google account created successfully' : 'Google login successful',
+      data: buildAuthPayload(user, generateToken(user._id)),
+    });
+  } catch (error) {
+    const status = error.statusCode || (res.statusCode === 200 ? 500 : res.statusCode);
+    res.status(status).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Start standard Google OAuth 2.0 / OIDC redirect flow
+// @route   GET /api/auth/google
+// @access  Public
+const startGoogleOAuth = async (req, res) => {
+  try {
+    const authUrl = createGoogleOAuthStateUrl(req);
+    return res.redirect(authUrl);
+  } catch (error) {
+    const msg = encodeURIComponent(error.message || 'Google Sign-In is not configured.');
+    return res.redirect(`${getClientBaseUrl()}/login?googleError=${msg}`);
+  }
+};
+
+// @desc    Handle Google OAuth 2.0 callback
+// @route   GET /api/auth/google/callback
+// @access  Public
+const handleGoogleOAuthCallback = async (req, res) => {
+  const clientBase = getClientBaseUrl();
+  try {
+    if (req.query.error) {
+      const reason =
+        req.query.error === 'access_denied'
+          ? 'Google sign-in was cancelled.'
+          : String(req.query.error);
+      return res.redirect(`${clientBase}/login?googleError=${encodeURIComponent(reason)}`);
+    }
+
+    verifyGoogleOAuthState(req.query.state);
+    const verifiedProfile = await exchangeCodeForVerifiedGoogleProfile(req.query.code, req);
+    const { user } = await resolveOrCreateGoogleUser(verifiedProfile);
+    const exchangeToken = createOneTimeExchangeToken(user._id);
+
+    return res.redirect(`${clientBase}/login?googleExchange=${encodeURIComponent(exchangeToken)}`);
+  } catch (error) {
+    const msg = encodeURIComponent(error.message || 'Google authentication failed.');
+    return res.redirect(`${clientBase}/login?googleError=${msg}`);
+  }
+};
+
+// @desc    Exchange short-lived one-time token from OAuth redirect for session JWT
+// @route   POST /api/auth/google/exchange
+// @access  Public
+const exchangeGoogleSession = async (req, res) => {
+  try {
+    const { exchangeToken } = req.body || {};
+    const userId = consumeOneTimeExchangeToken(exchangeToken);
+    const user = await User.findById(userId);
+
+    if (!user || user.isActive === false) {
+      res.status(401);
+      throw new Error('Account not available or disabled.');
+    }
+
+    res.json({
+      success: true,
+      message: 'Google login successful',
+      data: buildAuthPayload(user, generateToken(user._id)),
+    });
+  } catch (error) {
+    const status = error.statusCode || (res.statusCode === 200 ? 500 : res.statusCode);
+    res.status(status).json({ success: false, message: error.message });
+  }
+};
+
 // @desc    Get user profile
 // @route   GET /api/auth/me
 // @access  Private
 const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('-password');
+    const user = await User.findById(req.user._id);
 
     if (user) {
       res.json({
         success: true,
-        data: user,
+        data: buildAuthPayload(user),
       });
     } else {
       res.status(404);
@@ -181,12 +375,13 @@ const updateUserProfile = async (req, res) => {
 
       // Email change checking
       if (req.body.email && req.body.email !== user.email) {
-        const emailExists = await User.findOne({ email: req.body.email });
+        const cleanEmail = String(req.body.email).trim().toLowerCase();
+        const emailExists = await User.findOne({ email: cleanEmail });
         if (emailExists) {
           res.status(400);
           throw new Error('Email already in use');
         }
-        user.email = req.body.email;
+        user.email = cleanEmail;
       }
 
       if (req.body.studentDetails && user.role === 'STUDENT') {
@@ -208,17 +403,7 @@ const updateUserProfile = async (req, res) => {
       res.json({
         success: true,
         message: 'Profile updated successfully',
-        data: {
-          _id: updatedUser._id,
-          name: updatedUser.name,
-          email: updatedUser.email,
-          role: updatedUser.role,
-          accountType: updatedUser.accountType || updatedUser.role,
-          phone: updatedUser.phone,
-          studentDetails: updatedUser.studentDetails,
-          staffDetails: updatedUser.staffDetails,
-          token: generateToken(updatedUser._id),
-        },
+        data: buildAuthPayload(updatedUser, generateToken(updatedUser._id)),
       });
     } else {
       res.status(404);
@@ -237,28 +422,53 @@ const changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
 
-    if (!oldPassword || !newPassword) {
+    if (!newPassword || String(newPassword).length < 6) {
       res.status(400);
-      throw new Error('Please fill in both password fields');
+      throw new Error('New password must be at least 6 characters long');
     }
 
     const user = await User.findById(req.user._id);
-
-    if (user && (await user.matchPassword(oldPassword))) {
-      user.password = newPassword;
-      await user.save();
-      res.json({
-        success: true,
-        message: 'Password changed successfully',
-      });
-    } else {
-      res.status(401);
-      throw new Error('Invalid current password');
+    if (!user) {
+      res.status(404);
+      throw new Error('User not found');
     }
+
+    if (user.password) {
+      if (!oldPassword) {
+        res.status(400);
+        throw new Error('Please fill in both password fields');
+      }
+      if (!(await user.matchPassword(oldPassword))) {
+        res.status(401);
+        throw new Error('Invalid current password');
+      }
+    }
+
+    user.password = newPassword;
+    if (user.googleId || user.firebaseUid) {
+      user.authProvider = 'hybrid';
+    }
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password updated successfully',
+    });
   } catch (error) {
     res.status(res.statusCode === 200 ? 500 : res.statusCode);
     res.json({ success: false, message: error.message });
   }
 };
 
-export { registerUser, loginUser, getUserProfile, updateUserProfile, changePassword };
+export {
+  registerUser,
+  loginUser,
+  getGoogleAuthConfig,
+  googleAuthLogin,
+  startGoogleOAuth,
+  handleGoogleOAuthCallback,
+  exchangeGoogleSession,
+  getUserProfile,
+  updateUserProfile,
+  changePassword,
+};

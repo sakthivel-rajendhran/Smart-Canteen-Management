@@ -107,9 +107,22 @@ const Home = () => {
 
         <div className="max-w-6xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 gap-12 items-center relative z-10">
           <div>
-            <div className="inline-flex items-center gap-2 bg-amber/15 border border-amber/35 px-4.5 py-1.5 rounded-full text-amber font-bold text-xs uppercase tracking-wider mb-6">
-              <span className="w-2 h-2 bg-amber rounded-full animate-ping"></span>
-              DRS College Canteen
+            <div
+              data-testid="hero-canteen-badge"
+              className="relative inline-flex items-center gap-2.5 bg-amber/15 border border-amber/35 px-4 py-1.5 rounded-full text-amber font-bold text-xs uppercase tracking-wider mb-6 overflow-hidden"
+            >
+              <span
+                data-testid="hero-canteen-dot-wrap"
+                className="relative inline-flex items-center justify-center w-3 h-3 shrink-0 overflow-hidden rounded-full"
+                aria-hidden="true"
+              >
+                <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-amber/75" />
+                <span
+                  data-testid="hero-canteen-dot"
+                  className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber"
+                />
+              </span>
+              <span>DRS College Canteen</span>
             </div>
             <h1 className="font-outfit font-black text-5xl md:text-6xl text-white leading-tight mb-5 tracking-tight">
               Fresh Food.<br />

@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import API from '../services/api';
+import { signOutFirebaseIfInitialized } from '../config/firebase';
 
 const AuthContext = createContext(null);
 
@@ -9,7 +10,6 @@ export const AuthProvider = ({ children }) => {
   const [authStatus, setAuthStatus] = useState('PUBLIC'); // 'PUBLIC' | 'AUTHENTICATED' | 'LOGGING_OUT'
 
   useEffect(() => {
-    // Check if user session exists in localStorage
     const savedUser = localStorage.getItem('drs_user');
     if (savedUser) {
       try {
@@ -33,20 +33,22 @@ export const AuthProvider = ({ children }) => {
     setLoading(false);
   }, []);
 
+  const persistSession = (userData) => {
+    localStorage.setItem('drs_user', JSON.stringify(userData));
+    setUser(userData);
+    setAuthStatus('AUTHENTICATED');
+  };
+
   const login = async (email, password) => {
     const response = await API.post('/auth/login', { email, password });
     if (response.data?.success) {
-      const userData = response.data.data;
-      localStorage.setItem('drs_user', JSON.stringify(userData));
-      setUser(userData);
-      setAuthStatus('AUTHENTICATED');
+      persistSession(response.data.data);
       return response.data;
     }
     throw new Error(response.data?.message || 'Login failed');
   };
 
   const register = async (registrationData, maybeEmail, maybePassword, maybePhone) => {
-    // Support both object payload and positional arguments for backwards compatibility
     const payload =
       typeof registrationData === 'object' && registrationData !== null
         ? registrationData
@@ -54,19 +56,37 @@ export const AuthProvider = ({ children }) => {
             name: registrationData,
             email: maybeEmail,
             password: maybePassword,
-            phone: maybePhone,
-            accountType: 'STUDENT',
+            ...(maybePhone ? { phone: maybePhone } : {}),
           };
 
     const response = await API.post('/auth/register', payload);
     if (response.data?.success) {
-      const userData = response.data.data;
-      localStorage.setItem('drs_user', JSON.stringify(userData));
-      setUser(userData);
-      setAuthStatus('AUTHENTICATED');
+      persistSession(response.data.data);
       return response.data;
     }
     throw new Error(response.data?.message || 'Registration failed');
+  };
+
+  const loginWithGoogle = async ({ firebaseIdToken, credential, code }) => {
+    const response = await API.post('/auth/google', {
+      ...(firebaseIdToken ? { firebaseIdToken } : {}),
+      ...(credential ? { credential } : {}),
+      ...(code ? { code } : {}),
+    });
+    if (response.data?.success) {
+      persistSession(response.data.data);
+      return response.data;
+    }
+    throw new Error(response.data?.message || 'Google authentication failed');
+  };
+
+  const exchangeGoogleSession = async (exchangeToken) => {
+    const response = await API.post('/auth/google/exchange', { exchangeToken });
+    if (response.data?.success) {
+      persistSession(response.data.data);
+      return response.data;
+    }
+    throw new Error(response.data?.message || 'Google session exchange failed');
   };
 
   const updateProfile = async (name, email, phone, details = {}) => {
@@ -74,7 +94,6 @@ export const AuthProvider = ({ children }) => {
     const response = await API.put('/auth/profile', payload);
     if (response.data?.success) {
       const updatedUser = response.data.data;
-      // Merge token into updated session
       const currentSession = JSON.parse(localStorage.getItem('drs_user') || '{}');
       const newSession = { ...updatedUser, token: currentSession.token };
       localStorage.setItem('drs_user', JSON.stringify(newSession));
@@ -86,11 +105,17 @@ export const AuthProvider = ({ children }) => {
 
   const changePassword = async (oldPassword, newPassword) => {
     const response = await API.put('/auth/change-password', { oldPassword, newPassword });
+    if (response.data?.success && user) {
+      const updatedSession = { ...user, hasPassword: true };
+      localStorage.setItem('drs_user', JSON.stringify(updatedSession));
+      setUser(updatedSession);
+    }
     return response.data;
   };
 
   const logout = () => {
     setAuthStatus('LOGGING_OUT');
+    signOutFirebaseIfInitialized();
     localStorage.removeItem('drs_user');
     localStorage.removeItem('drs_cart');
     setUser(null);
@@ -116,6 +141,8 @@ export const AuthProvider = ({ children }) => {
         isAdmin,
         login,
         register,
+        loginWithGoogle,
+        exchangeGoogleSession,
         updateProfile,
         changePassword,
         logout,

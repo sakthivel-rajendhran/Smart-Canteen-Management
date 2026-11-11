@@ -93,6 +93,7 @@ const Cart = () => {
       const orderData = {
         items: cart.map((i) => ({
           menuItem: i.menuItem,
+          variantId: i.variantId || null,
           name: i.name,
           quantity: i.quantity,
           serviceType: parcelEnabled && i.serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL',
@@ -237,16 +238,19 @@ const Cart = () => {
               const itemFoodTotal = Number((Number(item.price) * item.quantity).toFixed(2));
               const itemLineTotal = Number((itemFoodTotal + itemParcelTotal).toFixed(2));
 
+              const variantIdAttr = item.variantId ? String(item.variantId) : 'default';
+
               return (
                 <div
-                  key={`${item.menuItem}::${svcType}`}
+                  key={`${item.menuItem}::${variantIdAttr}::${svcType}`}
                   data-testid={`cart-item-${item.menuItem}-${svcType}`}
+                  data-variant-id={variantIdAttr}
                   className="flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-4 py-4 border-b border-gray-100 last:border-b-0"
                 >
                   {item.image ? (
                     <img
                       src={item.image}
-                      alt={item.name}
+                      alt={item.variantLabel ? `${item.name} (${item.variantLabel})` : item.name}
                       className="w-14 h-14 rounded-2xl object-cover border border-border shadow-sm flex-shrink-0"
                     />
                   ) : (
@@ -256,7 +260,14 @@ const Cart = () => {
                   )}
                   <div className="flex-1 min-w-[140px]">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-outfit font-bold text-sm text-primary-dark break-words">{item.name}</h3>
+                      <h3 className="font-outfit font-bold text-sm text-primary-dark break-words">
+                        {item.name}
+                      </h3>
+                      {item.variantLabel && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cream text-primary-dark border border-border">
+                          {item.variantLabel}
+                        </span>
+                      )}
                       <span
                         className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider border ${
                           isParcel
@@ -280,7 +291,7 @@ const Cart = () => {
                       <div className="inline-flex items-center gap-1 bg-cream border border-border rounded-lg p-0.5 mt-2">
                         <button
                           type="button"
-                          onClick={() => changeItemServiceType(item.menuItem, svcType, 'NORMAL')}
+                          onClick={() => changeItemServiceType(item.menuItem, svcType, 'NORMAL', item.variantId || null)}
                           className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
                             !isParcel
                               ? 'bg-primary-dark text-white shadow-2xs'
@@ -291,7 +302,7 @@ const Cart = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => changeItemServiceType(item.menuItem, svcType, 'PARCEL')}
+                          onClick={() => changeItemServiceType(item.menuItem, svcType, 'PARCEL', item.variantId || null)}
                           className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
                             isParcel
                               ? 'bg-amber text-primary-darker font-black shadow-2xs'
@@ -308,7 +319,7 @@ const Cart = () => {
                   <div className="flex items-center border border-border rounded-full p-0.5 shrink-0">
                     <button
                       type="button"
-                      onClick={() => changeQuantity(item.menuItem, -1, svcType)}
+                      onClick={() => changeQuantity(item.menuItem, -1, svcType, item.variantId || null)}
                       className="w-8 h-8 bg-gray-50 hover:bg-primary-light text-primary-dark rounded-full font-bold flex items-center justify-center transition-all"
                     >
                       −
@@ -316,7 +327,7 @@ const Cart = () => {
                     <span className="font-bold text-xs px-3 text-primary-dark">{item.quantity}</span>
                     <button
                       type="button"
-                      onClick={() => changeQuantity(item.menuItem, 1, svcType)}
+                      onClick={() => changeQuantity(item.menuItem, 1, svcType, item.variantId || null)}
                       className="w-8 h-8 bg-gray-50 hover:bg-primary-light text-primary-dark rounded-full font-bold flex items-center justify-center transition-all"
                     >
                       +
@@ -329,7 +340,7 @@ const Cart = () => {
 
                   <button
                     type="button"
-                    onClick={() => removeFromCart(item.menuItem, svcType)}
+                    onClick={() => removeFromCart(item.menuItem, svcType, item.variantId || null)}
                     className="text-gray-300 hover:text-red-500 p-1 rounded-lg transition-all shrink-0"
                     title="Remove Item"
                   >

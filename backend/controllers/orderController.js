@@ -10,6 +10,7 @@ import {
   isItemParcelEligible,
   resolveItemParcelPricing,
 } from '../utils/parcelHelper.js';
+import { resolveOrderVariantSelection } from '../utils/variantHelper.js';
 import generateOrderCode from '../utils/generateOrderCode.js';
 import {
   createAndEmitNotification,
@@ -63,6 +64,18 @@ const createOrder = async (req, res) => {
       .populate('categories', 'name active parcelEligible')
       .lean();
     const dbItemMap = new Map(dbItems.map((item) => [item._id.toString(), item]));
+    const parentIds = dbItems
+      .map((item) => item.variantParent)
+      .filter(Boolean)
+      .map((id) => String(id));
+    const parentDocs =
+      parentIds.length > 0
+        ? await MenuItem.find({ _id: { $in: parentIds } })
+            .populate('category', 'name active parcelEligible')
+            .populate('categories', 'name active parcelEligible')
+            .lean()
+        : [];
+    const parentItemMap = new Map(parentDocs.map((item) => [item._id.toString(), item]));
     const { parcelEnabled, parcelChargePerItem } = await getOrCreateParcelSettings();
 
     let subtotal = 0;
@@ -83,44 +96,59 @@ const createOrder = async (req, res) => {
         return res.status(404).json({ success: false, message: `Menu item not found: ${item.name || item.menuItem}` });
       }
 
+      const parentDoc = dbItem.variantParent
+        ? parentItemMap.get(String(dbItem.variantParent)) || null
+        : null;
+      const effectiveItemForCat = parentDoc || dbItem;
+
       const assignedCats = [
-        dbItem.category,
-        ...(Array.isArray(dbItem.categories) ? dbItem.categories : []),
+        effectiveItemForCat.category,
+        ...(Array.isArray(effectiveItemForCat.categories) ? effectiveItemForCat.categories : []),
       ].filter(Boolean);
       if (assignedCats.length > 0 && !assignedCats.some((c) => c.active !== false)) {
         return res.status(400).json({
           success: false,
-          message: `"${dbItem.name}" belongs to an inactive category ("${dbItem.category?.name || 'Inactive'}") and cannot be ordered right now.`
+          message: `"${effectiveItemForCat.name}" belongs to an inactive category ("${effectiveItemForCat.category?.name || 'Inactive'}") and cannot be ordered right now.`
         });
       }
 
-      if (!dbItem.available) {
+      if (!effectiveItemForCat.available) {
         return res.status(400).json({
           success: false,
-          message: `"${dbItem.name}" is sold out. Please remove it from your cart before checking out.`
+          message: `"${effectiveItemForCat.name}" is sold out. Please remove it from your cart before checking out.`
         });
       }
+
+      const resolvedVariant = resolveOrderVariantSelection(
+        dbItem,
+        item.variantId || null,
+        parentDoc
+      );
 
       const pricing = resolveItemParcelPricing({
         rawServiceType: item.serviceType,
         quantity: qty,
-        unitFoodPrice: dbItem.price,
+        unitFoodPrice: resolvedVariant.unitFoodPrice,
         parcelEnabled,
         parcelChargePerItem,
-        itemParcelEligible: isItemParcelEligible(dbItem),
-        itemName: dbItem.name,
+        itemParcelEligible: isItemParcelEligible(resolvedVariant.parentItem),
+        itemName: resolvedVariant.variantLabel
+          ? `${resolvedVariant.displayName} (${resolvedVariant.variantLabel})`
+          : resolvedVariant.displayName,
       });
 
       subtotal += pricing.itemFoodTotal;
       parcelChargeTotal += pricing.parcelChargeTotal;
 
       verifiedItems.push({
-        menuItem: dbItem._id,
-        name: dbItem.name,
-        price: dbItem.price,
+        menuItem: resolvedVariant.parentItem._id,
+        variantId: resolvedVariant.variantId,
+        variantLabel: resolvedVariant.variantLabel,
+        name: resolvedVariant.displayName,
+        price: resolvedVariant.unitFoodPrice,
         quantity: qty,
-        emoji: dbItem.emoji,
-        image: (dbItem.image && typeof dbItem.image === 'object' ? dbItem.image.url : dbItem.image) || '',
+        emoji: resolvedVariant.parentItem.emoji,
+        image: resolvedVariant.imageUrl,
         serviceType: pricing.serviceType,
         parcelChargePerUnit: pricing.parcelChargePerUnit,
         parcelChargeTotal: pricing.parcelChargeTotal,
@@ -187,6 +215,7 @@ const createOrder = async (req, res) => {
       paymentStatus: paymentMethod === 'cod' ? 'cod' : 'pending',
       paymentId: paymentId || '',
       status: 'Placed',
+      statusTimestamps: { Placed: new Date() },
     });
 
     // Send HTTP response immediately (non-blocking)
@@ -355,6 +384,14 @@ const updateOrderStatus = async (req, res) => {
     }
 
     order.status = status;
+    const now = new Date();
+    if (!order.statusTimestamps) {
+      order.statusTimestamps = new Map();
+    }
+    if (!order.statusTimestamps.get('Placed') && order.createdAt) {
+      order.statusTimestamps.set('Placed', order.createdAt);
+    }
+    order.statusTimestamps.set(status, now);
 
     // Handle payment auto-settlement and handover stamping for Handover Bill / Completed
     if (status === 'Completed' || status === 'Handover Bill') {
@@ -362,9 +399,11 @@ const updateOrderStatus = async (req, res) => {
         order.paymentStatus = 'paid';
       }
       order.handoverVerified = true;
-      order.completedAt = order.completedAt || new Date();
-      order.handoverVerifiedAt = order.handoverVerifiedAt || new Date();
+      order.completedAt = order.completedAt || now;
+      order.handoverVerifiedAt = order.handoverVerifiedAt || now;
       order.handoverVerifiedBy = req.user._id;
+      order.statusTimestamps.set('Handover Bill', order.statusTimestamps.get('Handover Bill') || now);
+      order.statusTimestamps.set('Completed', order.statusTimestamps.get('Completed') || now);
     }
 
     await order.save();
@@ -377,6 +416,7 @@ const updateOrderStatus = async (req, res) => {
           orderId: order._id,
           orderCode: order.orderCode,
           status: order.status,
+          statusTimestamps: order.statusTimestamps ? Object.fromEntries(order.statusTimestamps) : undefined,
           paymentStatus: order.paymentStatus,
           order,
         });

@@ -725,7 +725,10 @@ const FoodHandover = () => {
                           return (
                             <div key={idx} className="flex justify-between items-center text-stone-800 gap-2">
                               <div className="truncate font-semibold flex items-center gap-1.5 min-w-0">
-                                <span className="truncate">{item.name}</span>
+                                <span className="truncate">
+                                  {item.name}
+                                  {item.variantLabel ? ` (${item.variantLabel})` : ''}
+                                </span>
                                 {isParcel && (
                                   <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber/25 text-amber-dark shrink-0">
                                     Parcel{Number(item.parcelChargeTotal || 0) > 0 ? ` +₹${Number(item.parcelChargeTotal)}` : ''}

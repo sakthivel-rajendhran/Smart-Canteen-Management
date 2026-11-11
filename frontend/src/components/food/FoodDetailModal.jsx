@@ -1,6 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Clock, Sparkles, Plus, Minus, ShoppingCart, CheckCircle, AlertCircle } from 'lucide-react';
-import { getItemCategories, isItemParcelEligible } from '../../utils/categoryHelpers';
+import {
+  getItemCategories,
+  isItemParcelEligible,
+  getItemVariants,
+  getDefaultVariant,
+} from '../../utils/categoryHelpers';
 
 const FoodDetailModal = ({
   item,
@@ -8,6 +13,7 @@ const FoodDetailModal = ({
   onClose,
   onAddToCart,
   initialQty = 1,
+  initialVariantId = null,
   parcelEnabled = true,
   parcelChargePerItem = 5,
 }) => {
@@ -15,25 +21,57 @@ const FoodDetailModal = ({
   const [serviceType, setServiceType] = useState('NORMAL');
   const [addedMessage, setAddedMessage] = useState(false);
 
+  const variants = useMemo(() => getItemVariants(item), [item]);
+  const hasVariants = variants.length > 0;
+  const defaultVariant = useMemo(() => getDefaultVariant(item), [item]);
+  const [selectedVariantId, setSelectedVariantId] = useState(null);
+
   useEffect(() => {
     setQty(initialQty > 0 ? initialQty : 1);
     setServiceType('NORMAL');
     setAddedMessage(false);
-  }, [item?._id, isOpen, initialQty]);
+    if (hasVariants) {
+      const preferred =
+        initialVariantId && variants.find((v) => String(v._id) === String(initialVariantId));
+      const fallback = preferred || defaultVariant || variants[0];
+      setSelectedVariantId(fallback?._id ? String(fallback._id) : null);
+    } else {
+      setSelectedVariantId(null);
+    }
+  }, [item?._id, isOpen, initialQty, initialVariantId, hasVariants, variants, defaultVariant]);
 
   if (!isOpen || !item) return null;
 
-  const imageUrl = item.image?.url || (typeof item.image === 'string' ? item.image : '') || '';
-  const isAvailable = item.available !== false;
+  const selectedVariant = hasVariants
+    ? variants.find((v) => String(v._id) === String(selectedVariantId)) ||
+      defaultVariant ||
+      variants[0]
+    : null;
+
+  const variantImage =
+    selectedVariant?.image && typeof selectedVariant.image === 'object'
+      ? selectedVariant.image.url
+      : typeof selectedVariant?.image === 'string'
+        ? selectedVariant.image
+        : '';
+  const imageUrl =
+    variantImage || item.image?.url || (typeof item.image === 'string' ? item.image : '') || '';
+  const isAvailable =
+    item.available !== false && (selectedVariant ? selectedVariant.available !== false : true);
+  const unitPrice = selectedVariant ? Number(selectedVariant.price) : Number(item.price);
+  const displayPrep =
+    (selectedVariant?.preparationTime && Number(selectedVariant.preparationTime)) ||
+    item.preparationTime ||
+    10;
   const itemParcelEligible = isItemParcelEligible(item);
   const canSelectParcel = parcelEnabled && itemParcelEligible;
   const effectiveServiceType = canSelectParcel ? serviceType : 'NORMAL';
   const parcelPerUnit = effectiveServiceType === 'PARCEL' ? Number(parcelChargePerItem) : 0;
-  const computedTotal = Number(((Number(item.price) + parcelPerUnit) * qty).toFixed(2));
+  const computedTotal = Number(((unitPrice + parcelPerUnit) * qty).toFixed(2));
 
   const handleAdd = () => {
     if (!isAvailable) return;
-    onAddToCart(item, qty, effectiveServiceType);
+    onAddToCart(item, qty, effectiveServiceType, selectedVariant);
     setAddedMessage(true);
     setTimeout(() => {
       setAddedMessage(false);
@@ -96,7 +134,7 @@ const FoodDetailModal = ({
               {isAvailable ? '✓ In Stock & Fresh' : '✕ Currently Sold Out'}
             </span>
             <span className="bg-black/60 backdrop-blur-md text-white px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5 text-amber" /> Prep: {item.preparationTime || 10} min
+              <Clock className="w-3.5 h-3.5 text-amber" /> Prep: {displayPrep} min
             </span>
           </div>
         </div>
@@ -106,7 +144,7 @@ const FoodDetailModal = ({
           <div className="flex items-start justify-between gap-4 mb-2">
             <div>
               <h2 className="font-outfit font-black text-2xl text-primary-dark leading-snug">
-                {item.name}
+                {item.name}{selectedVariant ? ` (${selectedVariant.label})` : ''}
               </h2>
               <span className="text-xs text-primary font-bold">
                 Authentic DRS Canteen Recipe
@@ -115,7 +153,7 @@ const FoodDetailModal = ({
             <div className="text-right">
               <span className="text-[10px] text-muted font-extrabold uppercase tracking-wider block">Price</span>
               <span className="font-outfit font-black text-2xl text-primary-dark">
-                ₹{item.price}
+                ₹{unitPrice}
               </span>
             </div>
           </div>
@@ -123,6 +161,37 @@ const FoodDetailModal = ({
           <p className="text-muted text-sm leading-relaxed mb-6 border-b border-border pb-4">
             {item.description || 'Prepared fresh daily with traditional South Indian spices and highest hygiene standards.'}
           </p>
+
+          {/* Pack Size / Variant Selector */}
+          {hasVariants && (
+            <div className="mb-4">
+              <span className="font-outfit font-bold text-xs uppercase tracking-wider text-muted block mb-2">
+                Select Pack Size
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {variants.map((variant) => {
+                  const isSelected = String(variant._id) === String(selectedVariant?._id);
+                  const variantSoldOut = variant.available === false;
+                  return (
+                    <button
+                      key={variant._id}
+                      type="button"
+                      onClick={() => setSelectedVariantId(String(variant._id))}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-primary-dark text-white border-primary-dark shadow-sm'
+                          : variantSoldOut
+                            ? 'bg-gray-50 text-gray-400 border-gray-200 line-through'
+                            : 'bg-cream text-primary-dark border-border hover:border-primary/40'
+                      }`}
+                    >
+                      {variant.label} · ₹{variant.price}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Service Type Selector (Shown ONLY for parcel-eligible categories when enabled) */}
           {isAvailable && canSelectParcel && (

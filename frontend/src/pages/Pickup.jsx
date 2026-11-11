@@ -4,17 +4,15 @@ import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import {
-  CheckCircle2,
+  Check,
   Clock,
-  Sparkles,
   Receipt,
   RefreshCw,
   AlertCircle,
   ChevronRight,
   ShoppingBag,
-  CreditCard,
-  Banknote,
   MapPin,
+  Ticket,
 } from 'lucide-react';
 
 const STATUS_CONFIG = {
@@ -156,8 +154,8 @@ const Pickup = () => {
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
           
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-amber text-[#0b3d2e] font-black text-2xl flex items-center justify-center shadow-md">
-              🎟️
+            <div className="w-12 h-12 rounded-2xl bg-amber text-[#0b3d2e] flex items-center justify-center shadow-md shrink-0">
+              <Ticket className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -373,11 +371,15 @@ const Pickup = () => {
                         }`}
                       >
                         {isHighlighted ? (
-                          <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5 animate-bounce" />
+                          <span className="w-5 h-5 rounded-full border-2 border-amber-700 bg-white flex items-center justify-center shrink-0 mt-0.5">
+                            <span className="w-2 h-2 rounded-full bg-amber-700" />
+                          </span>
                         ) : isPreparing ? (
-                          <Clock className="w-5 h-5 text-orange-600 shrink-0 mt-0.5 animate-spin" />
+                          <Clock className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
                         ) : isCompleted ? (
-                          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                          <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                            <Check className="w-3.5 h-3.5 stroke-[2.75]" />
+                          </span>
                         ) : (
                           <ShoppingBag className="w-5 h-5 text-stone-400 shrink-0 mt-0.5" />
                         )}
@@ -404,6 +406,7 @@ const Pickup = () => {
                                 <div className="flex items-center gap-1.5 min-w-0">
                                   <span className="font-semibold truncate">
                                     {item.name}
+                                    {item.variantLabel ? ` (${item.variantLabel})` : ''}
                                   </span>
                                   {isParcel && (
                                     <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber/20 text-amber-dark shrink-0">

@@ -44,6 +44,14 @@ const orderSchema = new mongoose.Schema(
           ref: 'MenuItem',
           required: true,
         },
+        variantId: {
+          type: mongoose.Schema.Types.ObjectId,
+          default: null,
+        },
+        variantLabel: {
+          type: String,
+          default: '',
+        },
         name: {
           type: String,
           required: true,
@@ -133,6 +141,11 @@ const orderSchema = new mongoose.Schema(
       ],
       default: 'Placed',
       index: true,
+    },
+    statusTimestamps: {
+      type: Map,
+      of: Date,
+      default: () => ({}),
     },
     completedAt: {
       type: Date,

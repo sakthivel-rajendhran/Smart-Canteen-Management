@@ -728,8 +728,9 @@ const LiveTracking = () => {
                             ) : (
                               <span className="text-sm shrink-0">{it.emoji || '🍛'}</span>
                             )}
-                            <span className="font-bold text-primary-dark truncate max-w-[130px]">
+                            <span className="font-bold text-primary-dark truncate max-w-[160px]">
                               {it.name}
+                              {it.variantLabel ? ` (${it.variantLabel})` : ''}
                             </span>
                             {isParcel && (
                               <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber/25 text-amber-dark shrink-0">
@@ -866,29 +867,40 @@ const LiveTracking = () => {
                 </span>
                 <div className="flex items-center justify-between relative px-2">
                   <div className="absolute left-6 right-6 top-3 h-0.5 bg-gray-200 -z-0" />
-                  {STATUS_PIPELINE.map((step, idx) => {
-                    const currentIndex = (selectedOrder.status === 'Handover Bill' || selectedOrder.status === 'Completed')
-                      ? 5
+                  {[...STATUS_PIPELINE, 'Completed'].map((step, idx, arr) => {
+                    const isFinal =
+                      selectedOrder.status === 'Handover Bill' ||
+                      selectedOrder.status === 'Completed';
+                    const currentIndex = isFinal
+                      ? arr.length - 1
                       : STATUS_PIPELINE.indexOf(selectedOrder.status);
-                    const isDone = currentIndex >= idx;
-                    const isCurrent = selectedOrder.status === step;
+                    const isCompleted = isFinal ? idx <= currentIndex : idx < currentIndex;
+                    const isCurrent = !isFinal && idx === currentIndex;
 
                     return (
                       <div key={step} className="flex flex-col items-center relative z-10">
                         <div
-                          className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all ${
-                            isCurrent
-                              ? 'bg-primary text-white ring-4 ring-primary-light scale-110'
-                              : isDone
-                              ? 'bg-primary text-white'
-                              : 'bg-gray-200 text-gray-500'
+                          className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                            isCompleted
+                              ? 'bg-emerald-600 border-emerald-600 text-white'
+                              : isCurrent
+                              ? 'bg-white border-primary-dark ring-4 ring-primary-light'
+                              : 'bg-white border-gray-300'
                           }`}
                         >
-                          {isDone ? '✓' : idx + 1}
+                          {isCompleted ? (
+                            <Check className="w-3.5 h-3.5 stroke-[2.75]" />
+                          ) : isCurrent ? (
+                            <span className="w-2 h-2 rounded-full bg-primary-dark" />
+                          ) : null}
                         </div>
                         <span
-                          className={`text-[9px] mt-1 font-bold ${
-                            isCurrent ? 'text-primary' : isDone ? 'text-primary-dark' : 'text-gray-400'
+                          className={`text-[9px] mt-1 font-bold text-center ${
+                            isCurrent
+                              ? 'text-primary-dark'
+                              : isCompleted
+                              ? 'text-emerald-700'
+                              : 'text-gray-400'
                           }`}
                         >
                           {step}
@@ -954,6 +966,7 @@ const LiveTracking = () => {
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <strong className="text-primary-dark leading-tight truncate">
                                 {it.name}
+                                {it.variantLabel ? ` (${it.variantLabel})` : ''}
                               </strong>
                               <span
                                 className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full ${

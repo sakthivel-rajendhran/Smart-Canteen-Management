@@ -8,6 +8,9 @@ const CartContext = createContext(null);
 const normalizeServiceType = (serviceType) =>
   String(serviceType || '').trim().toUpperCase() === 'PARCEL' ? 'PARCEL' : 'NORMAL';
 
+const getCartLineKey = (menuItemId, variantId, serviceType) =>
+  `${menuItemId}::${variantId ? String(variantId) : 'default'}::${serviceType}`;
+
 const mergeDuplicateCartLines = (items = [], parcelEnabled = true) => {
   const mergedMap = new Map();
   for (const raw of items) {
@@ -15,7 +18,8 @@ const mergeDuplicateCartLines = (items = [], parcelEnabled = true) => {
     const itemEligible = raw.parcelEligible !== false && isItemParcelEligible(raw);
     const resolvedType =
       parcelEnabled && itemEligible ? normalizeServiceType(raw.serviceType) : 'NORMAL';
-    const key = `${raw.menuItem}::${resolvedType}`;
+    const normalizedVariantId = raw.variantId ? String(raw.variantId) : null;
+    const key = getCartLineKey(raw.menuItem, normalizedVariantId, resolvedType);
     const qty = Math.max(1, Number(raw.quantity) || 1);
 
     if (mergedMap.has(key)) {
@@ -28,6 +32,8 @@ const mergeDuplicateCartLines = (items = [], parcelEnabled = true) => {
     } else {
       mergedMap.set(key, {
         ...raw,
+        variantId: normalizedVariantId,
+        variantLabel: raw.variantLabel || '',
         parcelEligible: itemEligible,
         serviceType: resolvedType,
         quantity: qty,
@@ -170,19 +176,36 @@ export const CartProvider = ({ children }) => {
     setCart(newCart);
   };
 
-  const addToCart = (item, quantityToAdd = 1, rawServiceType = 'NORMAL') => {
+  const addToCart = (item, quantityToAdd = 1, rawServiceType = 'NORMAL', variant = null) => {
     const itemEligible = isItemParcelEligible(item);
     const resolvedType =
       parcelEnabled && itemEligible ? normalizeServiceType(rawServiceType) : 'NORMAL';
+    const resolvedVariant =
+      variant || (Array.isArray(item.variants) && item.variants.length > 0 ? item.variants.find((v) => v.available !== false) || item.variants[0] : null);
+    const resolvedVariantId = resolvedVariant?._id ? String(resolvedVariant._id) : null;
+    const resolvedVariantLabel = resolvedVariant?.label || '';
+    const resolvedPrice = Number(resolvedVariant ? resolvedVariant.price : item.price);
+
     const existingIndex = cart.findIndex(
-      (i) => i.menuItem === item._id && normalizeServiceType(i.serviceType) === resolvedType
+      (i) =>
+        i.menuItem === item._id &&
+        String(i.variantId || '') === String(resolvedVariantId || '') &&
+        normalizeServiceType(i.serviceType) === resolvedType
     );
     let newCart = [...cart];
-    const imageUrl = (item.image && typeof item.image === 'object' ? item.image.url : item.image) || '';
+    const variantImage =
+      resolvedVariant?.image && typeof resolvedVariant.image === 'object'
+        ? resolvedVariant.image.url
+        : resolvedVariant?.image;
+    const parentImage = item.image && typeof item.image === 'object' ? item.image.url : item.image;
+    const imageUrl = variantImage || parentImage || '';
 
     if (existingIndex > -1) {
       newCart[existingIndex] = {
         ...newCart[existingIndex],
+        price: resolvedPrice,
+        variantLabel: resolvedVariantLabel,
+        image: imageUrl || newCart[existingIndex].image,
         quantity: newCart[existingIndex].quantity + quantityToAdd,
         parcelEligible: itemEligible,
         serviceType: resolvedType,
@@ -190,8 +213,10 @@ export const CartProvider = ({ children }) => {
     } else {
       newCart.push({
         menuItem: item._id,
+        variantId: resolvedVariantId,
+        variantLabel: resolvedVariantLabel,
         name: item.name,
-        price: item.price,
+        price: resolvedPrice,
         quantity: quantityToAdd,
         serviceType: resolvedType,
         parcelEligible: itemEligible,
@@ -203,15 +228,20 @@ export const CartProvider = ({ children }) => {
     removeCoupon(); // Reset coupon on cart change to enforce validations
   };
 
-  const changeQuantity = (menuItemId, amount, rawServiceType = 'NORMAL') => {
+  const changeQuantity = (menuItemId, amount, rawServiceType = 'NORMAL', variantId = null) => {
     const requestedType = normalizeServiceType(rawServiceType);
+    const targetVariantStr = variantId ? String(variantId) : '';
     const newCart = cart
       .map((item) => {
         const itemType =
           parcelEnabled && item.parcelEligible !== false
             ? normalizeServiceType(item.serviceType)
             : 'NORMAL';
-        if (item.menuItem === menuItemId && itemType === requestedType) {
+        if (
+          item.menuItem === menuItemId &&
+          String(item.variantId || '') === targetVariantStr &&
+          itemType === requestedType
+        ) {
           return { ...item, quantity: item.quantity + amount };
         }
         return item;
@@ -222,17 +252,22 @@ export const CartProvider = ({ children }) => {
     removeCoupon();
   };
 
-  const changeItemServiceType = (menuItemId, fromRawType, toRawType) => {
+  const changeItemServiceType = (menuItemId, fromRawType, toRawType, variantId = null) => {
     const fromType = normalizeServiceType(fromRawType);
     const toType = parcelEnabled ? normalizeServiceType(toRawType) : 'NORMAL';
     if (fromType === toType) return;
+    const targetVariantStr = variantId ? String(variantId) : '';
 
     const updated = cart.map((item) => {
       const itemEligible = item.parcelEligible !== false && isItemParcelEligible(item);
       if (toType === 'PARCEL' && !itemEligible) {
         return item;
       }
-      if (item.menuItem === menuItemId && normalizeServiceType(item.serviceType) === fromType) {
+      if (
+        item.menuItem === menuItemId &&
+        String(item.variantId || '') === targetVariantStr &&
+        normalizeServiceType(item.serviceType) === fromType
+      ) {
         return { ...item, parcelEligible: itemEligible, serviceType: toType };
       }
       return item;
@@ -242,9 +277,17 @@ export const CartProvider = ({ children }) => {
     removeCoupon();
   };
 
-  const removeFromCart = (menuItemId, rawServiceType = null) => {
+  const removeFromCart = (menuItemId, rawServiceType = null, variantId = null) => {
+    const hasVariantFilter = variantId !== undefined;
+    const targetVariantStr = variantId ? String(variantId) : '';
     const newCart = cart.filter((item) => {
       if (item.menuItem !== menuItemId) return true;
+      if (hasVariantFilter && variantId !== null && String(item.variantId || '') !== targetVariantStr) {
+        return true;
+      }
+      if (hasVariantFilter && variantId === null && item.variantId) {
+        return true;
+      }
       if (rawServiceType === null || rawServiceType === undefined) return false;
       return normalizeServiceType(item.serviceType) !== normalizeServiceType(rawServiceType);
     });
@@ -252,9 +295,12 @@ export const CartProvider = ({ children }) => {
     removeCoupon();
   };
 
-  const getItemQuantity = (menuItemId, rawServiceType = null) => {
+  const getItemQuantity = (menuItemId, rawServiceType = null, variantId = undefined) => {
     return cart.reduce((acc, item) => {
       if (item.menuItem !== menuItemId) return acc;
+      if (variantId !== undefined && String(item.variantId || '') !== String(variantId || '')) {
+        return acc;
+      }
       if (rawServiceType && normalizeServiceType(item.serviceType) !== normalizeServiceType(rawServiceType)) {
         return acc;
       }
@@ -321,23 +367,42 @@ export const CartProvider = ({ children }) => {
       const response = await API.post('/menu/check', { ids });
       if (response.data?.success) {
         const menuItems = response.data.data;
-        let eligibilityChanged = false;
+        let cartChanged = false;
         const syncedCart = cart.map((cartItem) => {
           const dbMatch = menuItems.find((i) => String(i._id) === String(cartItem.menuItem));
           if (!dbMatch) return cartItem;
           const eligible = dbMatch.parcelEligible !== false;
-          if (cartItem.parcelEligible !== eligible || (!eligible && cartItem.serviceType === 'PARCEL')) {
-            eligibilityChanged = true;
+          const dbVariants = Array.isArray(dbMatch.variants) ? dbMatch.variants : [];
+          const matchedVariant = cartItem.variantId
+            ? dbVariants.find(
+                (v) =>
+                  String(v._id) === String(cartItem.variantId) ||
+                  (v.legacyMenuItemId && String(v.legacyMenuItemId) === String(cartItem.variantId))
+              )
+            : null;
+          const nextPrice = matchedVariant ? Number(matchedVariant.price) : Number(dbMatch.price);
+          const nextLabel = matchedVariant ? matchedVariant.label : cartItem.variantLabel || '';
+          const nextSvc = eligible ? cartItem.serviceType : 'NORMAL';
+
+          if (
+            cartItem.parcelEligible !== eligible ||
+            cartItem.serviceType !== nextSvc ||
+            Number(cartItem.price) !== nextPrice ||
+            (cartItem.variantLabel || '') !== nextLabel
+          ) {
+            cartChanged = true;
             return {
               ...cartItem,
+              price: nextPrice,
+              variantLabel: nextLabel,
               parcelEligible: eligible,
-              serviceType: eligible ? cartItem.serviceType : 'NORMAL',
+              serviceType: nextSvc,
             };
           }
           return cartItem;
         });
 
-        if (eligibilityChanged) {
+        if (cartChanged) {
           saveCart(mergeDuplicateCartLines(syncedCart, parcelEnabled));
         }
 
@@ -348,6 +413,26 @@ export const CartProvider = ({ children }) => {
           }
           if (!matchingDbItem.available) {
             return { valid: false, message: `"${cartItem.name}" is sold out. Please remove it.` };
+          }
+          const dbVariants = Array.isArray(matchingDbItem.variants) ? matchingDbItem.variants : [];
+          if (dbVariants.length > 0) {
+            const matchedVariant = dbVariants.find(
+              (v) =>
+                String(v._id) === String(cartItem.variantId) ||
+                (v.legacyMenuItemId && String(v.legacyMenuItemId) === String(cartItem.variantId))
+            );
+            if (!matchedVariant) {
+              return {
+                valid: false,
+                message: `Selected option for "${cartItem.name}" is no longer available. Please re-add it.`,
+              };
+            }
+            if (matchedVariant.available === false) {
+              return {
+                valid: false,
+                message: `"${cartItem.name} (${matchedVariant.label})" is currently sold out. Please remove it.`,
+              };
+            }
           }
         }
         return { valid: true };

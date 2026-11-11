@@ -356,6 +356,7 @@ const Bill = () => {
                       <div className="flex-1 pr-1">
                         <div className="font-bold leading-tight break-words">
                           {item.name}
+                          {item.variantLabel ? ` (${item.variantLabel})` : ''}
                           {isParcel && (
                             <span className="text-[9px] font-black uppercase ml-1">[PARCEL]</span>
                           )}

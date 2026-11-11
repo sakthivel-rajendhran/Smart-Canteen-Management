@@ -81,3 +81,15 @@ export const syncItemCategoryUpdate = (item, updatedCat) => {
     categories: Array.isArray(item.categories) ? item.categories.map(patchCat) : item.categories,
   };
 };
+
+export const getItemVariants = (item) =>
+  Array.isArray(item?.variants) ? item.variants.filter(Boolean) : [];
+
+export const getDefaultVariant = (item) => {
+  const variants = getItemVariants(item);
+  if (variants.length === 0) return null;
+  return variants.find((v) => v.available !== false) || variants[0];
+};
+
+export const formatItemDisplayName = (name, variantLabel = '') =>
+  variantLabel ? `${name} (${variantLabel})` : name;

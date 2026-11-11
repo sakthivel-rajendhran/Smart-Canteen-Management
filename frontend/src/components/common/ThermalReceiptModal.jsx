@@ -523,6 +523,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
                         <div className="flex-1 pr-1">
                           <div className="font-bold leading-tight break-words">
                             {item.name}
+                            {item.variantLabel ? ` (${item.variantLabel})` : ''}
                             {isParcel && (
                               <span className={`${is58mm ? 'text-[8px]' : 'text-[9px]'} font-black uppercase ml-1`}>
                                 [PARCEL]

@@ -1,12 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Minus, Sparkles, Clock, AlertCircle } from 'lucide-react';
-import { getItemCategories, isItemParcelEligible } from '../../utils/categoryHelpers';
+import {
+  getItemCategories,
+  isItemParcelEligible,
+  getItemVariants,
+  getDefaultVariant,
+} from '../../utils/categoryHelpers';
 
 const FoodCard = ({
   item,
   quantity = 0,
   normalQty = 0,
   parcelQty = 0,
+  getVariantQty = null,
+  cartSummary = null,
   parcelEnabled = true,
   parcelChargePerItem = 5,
   onAdd,
@@ -17,20 +24,63 @@ const FoodCard = ({
   const [imageError, setImageError] = useState(false);
   const [serviceType, setServiceType] = useState('NORMAL');
 
+  const variants = useMemo(() => getItemVariants(item), [item]);
+  const hasVariants = variants.length > 0;
+  const defaultVariant = useMemo(() => getDefaultVariant(item), [item]);
+  const [selectedVariantId, setSelectedVariantId] = useState(() =>
+    defaultVariant?._id ? String(defaultVariant._id) : null
+  );
+
+  useEffect(() => {
+    if (!hasVariants) {
+      setSelectedVariantId(null);
+      return;
+    }
+    const stillExists = variants.some((v) => String(v._id) === String(selectedVariantId));
+    if (!stillExists) {
+      setSelectedVariantId(defaultVariant?._id ? String(defaultVariant._id) : null);
+    }
+  }, [item?._id, hasVariants, variants, defaultVariant, selectedVariantId]);
+
+  const selectedVariant = useMemo(() => {
+    if (!hasVariants) return null;
+    return (
+      variants.find((v) => String(v._id) === String(selectedVariantId)) ||
+      defaultVariant ||
+      variants[0]
+    );
+  }, [hasVariants, variants, selectedVariantId, defaultVariant]);
+
   const itemParcelEligible = isItemParcelEligible(item);
   const canSelectParcel = parcelEnabled && itemParcelEligible;
   const effectiveServiceType = canSelectParcel ? serviceType : 'NORMAL';
+
+  const variantIdArg = hasVariants ? String(selectedVariant?._id || '') : null;
+  const activeNormalQty = getVariantQty
+    ? getVariantQty('NORMAL', variantIdArg)
+    : normalQty;
+  const activeParcelQty = getVariantQty
+    ? getVariantQty('PARCEL', variantIdArg)
+    : parcelQty;
   const activeQty =
     effectiveServiceType === 'PARCEL'
-      ? parcelQty
+      ? activeParcelQty
       : canSelectParcel
-        ? normalQty
-        : normalQty || quantity;
+        ? activeNormalQty
+        : activeNormalQty || (hasVariants ? 0 : quantity);
 
-  const rawImageUrl = item?.image?.url || (typeof item?.image === 'string' ? item.image : '') || '';
+  const rawVariantUrl =
+    selectedVariant?.image && typeof selectedVariant.image === 'object'
+      ? selectedVariant.image.url
+      : typeof selectedVariant?.image === 'string'
+        ? selectedVariant.image
+        : '';
+  const rawParentUrl =
+    item?.image?.url || (typeof item?.image === 'string' ? item.image : '') || '';
+  const rawImageUrl = rawVariantUrl || rawParentUrl;
 
   // Cloudinary image delivery optimization (WebP/AVIF, auto quality, scaled to 400px)
-  const imageUrl = React.useMemo(() => {
+  const imageUrl = useMemo(() => {
     if (!rawImageUrl || typeof rawImageUrl !== 'string') return '';
     if (rawImageUrl.includes('res.cloudinary.com') && rawImageUrl.includes('/upload/') && !rawImageUrl.includes('/upload/f_')) {
       return rawImageUrl.replace('/upload/', '/upload/f_auto,q_auto,w_400,c_limit/');
@@ -38,7 +88,18 @@ const FoodCard = ({
     return rawImageUrl;
   }, [rawImageUrl]);
 
-  const isAvailable = item?.available !== false;
+  useEffect(() => {
+    setImageError(false);
+  }, [imageUrl]);
+
+  const parentAvailable = item?.available !== false;
+  const variantAvailable = selectedVariant ? selectedVariant.available !== false : true;
+  const isAvailable = parentAvailable && variantAvailable;
+  const displayPrice = selectedVariant ? Number(selectedVariant.price) : Number(item.price);
+  const displayPrepTime =
+    (selectedVariant?.preparationTime && Number(selectedVariant.preparationTime)) ||
+    item.preparationTime ||
+    10;
   const isFeatured = Boolean(item?.featured);
 
   return (
@@ -49,7 +110,7 @@ const FoodCard = ({
     >
       {/* 4:3 Image Container with Hover Zoom */}
       <div 
-        onClick={() => onOpenDetail && onOpenDetail(item)}
+        onClick={() => onOpenDetail && onOpenDetail(item, selectedVariant?._id || null)}
         className="relative w-full aspect-[4/3] bg-cream overflow-hidden cursor-pointer select-none"
       >
         {/* Skeleton loader while image is loading */}
@@ -61,7 +122,7 @@ const FoodCard = ({
         {imageUrl && !imageError ? (
           <img
             src={imageUrl}
-            alt={item.name}
+            alt={selectedVariant ? `${item.name} ${selectedVariant.label}` : item.name}
             width="400"
             height="300"
             loading="lazy"
@@ -126,7 +187,7 @@ const FoodCard = ({
       <div className="p-4 md:p-5 flex flex-col flex-1 min-w-0">
         {/* Title */}
         <h3 
-          onClick={() => onOpenDetail && onOpenDetail(item)}
+          onClick={() => onOpenDetail && onOpenDetail(item, selectedVariant?._id || null)}
           className="font-outfit font-black text-sm md:text-base text-primary-dark hover:text-primary mb-1 leading-snug break-words cursor-pointer transition-colors"
           title={item.name}
         >
@@ -137,6 +198,35 @@ const FoodCard = ({
         <p className="text-muted text-[11px] md:text-xs leading-relaxed break-words mb-3 flex-1">
           {item.description || 'Authentic traditional recipe prepared fresh everyday at DRS College Canteen.'}
         </p>
+
+        {/* Pack Size / Variant Selector (Clean text buttons, no emojis) */}
+        {hasVariants && (
+          <div onClick={(e) => e.stopPropagation()} className="mb-2.5">
+            <div className="flex flex-wrap gap-1.5">
+              {variants.map((variant) => {
+                const isSelected = String(variant._id) === String(selectedVariant?._id);
+                const variantSoldOut = variant.available === false;
+                return (
+                  <button
+                    key={variant._id}
+                    type="button"
+                    data-testid={`food-variant-${item._id}-${variant._id}`}
+                    onClick={() => setSelectedVariantId(String(variant._id))}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all whitespace-nowrap cursor-pointer ${
+                      isSelected
+                        ? 'bg-primary-dark text-white border-primary-dark shadow-xs'
+                        : variantSoldOut
+                          ? 'bg-gray-50 text-gray-400 border-gray-200 line-through'
+                          : 'bg-cream text-primary-dark border-border hover:border-primary/40 hover:bg-primary-light/40'
+                    }`}
+                  >
+                    {variant.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Per-Item Normal / Parcel Option Selector (Shown ONLY for parcel-eligible items when enabled) */}
         {canSelectParcel && isAvailable && (
@@ -167,13 +257,19 @@ const FoodCard = ({
                 Parcel +₹{parcelChargePerItem}
               </button>
             </div>
-            {(normalQty > 0 || parcelQty > 0) && (normalQty > 0 && parcelQty > 0 || (effectiveServiceType === 'NORMAL' && parcelQty > 0) || (effectiveServiceType === 'PARCEL' && normalQty > 0)) && (
+            {(activeNormalQty > 0 || activeParcelQty > 0) && ((activeNormalQty > 0 && activeParcelQty > 0) || (effectiveServiceType === 'NORMAL' && activeParcelQty > 0) || (effectiveServiceType === 'PARCEL' && activeNormalQty > 0)) && (
               <div className="text-[10px] font-semibold text-primary-dark/80 mt-1 px-1 truncate">
-                In tray: {normalQty > 0 ? `${normalQty} Normal` : ''}
-                {normalQty > 0 && parcelQty > 0 ? ' · ' : ''}
-                {parcelQty > 0 ? `${parcelQty} Parcel` : ''}
+                In tray: {activeNormalQty > 0 ? `${activeNormalQty} Normal` : ''}
+                {activeNormalQty > 0 && activeParcelQty > 0 ? ' · ' : ''}
+                {activeParcelQty > 0 ? `${activeParcelQty} Parcel` : ''}
               </div>
             )}
+          </div>
+        )}
+
+        {hasVariants && cartSummary && (
+          <div className="text-[10px] font-semibold text-primary-dark/80 mb-2 px-0.5 truncate">
+            {cartSummary}
           </div>
         )}
 
@@ -182,11 +278,14 @@ const FoodCard = ({
           <div className="min-w-0 shrink-0">
             <div className="flex items-center gap-1 text-[10px] text-muted font-bold mb-0.5">
               <Clock className="w-3 h-3 text-primary shrink-0" />
-              <span>{item.preparationTime || 10} mins</span>
+              <span>{displayPrepTime} mins</span>
             </div>
             <div className="flex items-baseline gap-1.5 flex-wrap">
-              <span className="font-outfit font-black text-lg md:text-xl text-primary-dark tracking-tight">
-                ₹{item.price}
+              <span
+                data-testid={`food-price-${item._id}`}
+                className="font-outfit font-black text-lg md:text-xl text-primary-dark tracking-tight"
+              >
+                ₹{displayPrice}
               </span>
               {canSelectParcel && effectiveServiceType === 'PARCEL' && isAvailable && (
                 <span className="text-[10px] font-bold text-amber-dark whitespace-nowrap">
@@ -211,7 +310,7 @@ const FoodCard = ({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onChangeQty(item._id, -1, effectiveServiceType);
+                    onChangeQty(item._id, -1, effectiveServiceType, variantIdArg);
                   }}
                   className="w-7 h-7 bg-white hover:bg-primary hover:text-white text-primary-dark rounded-lg font-bold flex items-center justify-center transition-all shadow-sm active:scale-95"
                   title="Decrease quantity"
@@ -225,7 +324,7 @@ const FoodCard = ({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onChangeQty(item._id, 1, effectiveServiceType);
+                    onChangeQty(item._id, 1, effectiveServiceType, variantIdArg);
                   }}
                   className="w-7 h-7 bg-white hover:bg-primary hover:text-white text-primary-dark rounded-lg font-bold flex items-center justify-center transition-all shadow-sm active:scale-95"
                   title="Increase quantity"
@@ -238,7 +337,7 @@ const FoodCard = ({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onAdd(item, effectiveServiceType);
+                  onAdd(item, effectiveServiceType, selectedVariant);
                 }}
                 data-testid={`food-add-${item._id}`}
                 className="group-hover:bg-primary bg-primary-dark text-white font-bold text-xs px-4 py-2 min-h-[36px] rounded-xl transition-all duration-200 shadow-md hover:shadow-lg inline-flex items-center justify-center gap-1 active:scale-95 whitespace-nowrap"

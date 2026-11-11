@@ -10,7 +10,9 @@ import {
   Tag, 
   BadgeAlert, 
   ShoppingBag,
-  Inbox
+  Inbox,
+  Check,
+  Ticket
 } from 'lucide-react';
 
 const Orders = () => {
@@ -50,28 +52,28 @@ const Orders = () => {
   };
 
   const isOrderActive = (status) => {
-    return ['Placed', 'Confirmed', 'Preparing', 'Ready'].includes(status);
+    return ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Pickup Bill'].includes(status);
   };
 
   const filteredOrders = orders.filter((order) => {
     if (filter === 'active') return isOrderActive(order.status);
-    if (filter === 'completed') return order.status === 'Completed';
+    if (filter === 'completed') return order.status === 'Completed' || order.status === 'Handover Bill';
     if (filter === 'cancelled') return order.status === 'Cancelled';
     return true; // 'all'
   });
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-10 pb-20">
-      <h1 className="font-outfit font-black text-3xl text-primary-dark mb-2">My Orders 📦</h1>
+    <div className="max-w-4xl mx-auto px-4 py-10 pb-24 sm:pb-20">
+      <h1 className="font-outfit font-black text-3xl text-primary-dark mb-2">My Orders</h1>
       <p className="text-muted text-sm mb-8">Track your active orders and view past billing receipts.</p>
 
       {/* Filter Tabs */}
       <div className="flex border-b border-border mb-8 gap-2 overflow-x-auto no-scrollbar">
         {[
           { key: 'all', label: 'All Orders' },
-          { key: 'active', label: 'Active ⏰' },
-          { key: 'completed', label: 'Completed ✓' },
-          { key: 'cancelled', label: 'Cancelled ✕' }
+          { key: 'active', label: 'Active' },
+          { key: 'completed', label: 'Completed' },
+          { key: 'cancelled', label: 'Cancelled' }
         ].map((tab) => (
           <button
             key={tab.key}
@@ -154,7 +156,10 @@ const Orders = () => {
                         ) : (
                           <span>{item.emoji}</span>
                         )}
-                        <span>{item.name}</span>
+                        <span>
+                          {item.name}
+                          {item.variantLabel ? ` (${item.variantLabel})` : ''}
+                        </span>
                         <span className="text-muted font-bold ml-0.5">x{item.quantity}</span>
                         {isParcel && (
                           <span className="text-[10px] font-black uppercase px-1.5 py-0.2 rounded-full bg-amber text-stone-950">
@@ -193,14 +198,15 @@ const Orders = () => {
 
                     <div className="text-right">
                       <span className="text-[10px] text-muted font-bold uppercase tracking-wider block mb-1">Payment</span>
-                      <span className={`px-4 py-1.5 rounded-full text-xs font-bold border ${
+                      <span className={`px-4 py-1.5 rounded-full text-xs font-bold border inline-flex items-center gap-1 ${
                         order.paymentStatus === 'paid'
                           ? 'bg-green-50 text-green-700 border-green-200'
                           : order.paymentStatus === 'cod'
                           ? 'bg-amber-light text-amber-dark border-amber-200'
                           : 'bg-gray-50 text-gray-500 border-gray-200'
                       }`}>
-                        {order.paymentStatus === 'paid' ? 'Paid ✓' : order.paymentStatus === 'cod' ? 'Cash Counter' : 'Pending'}
+                        {order.paymentStatus === 'paid' && <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
+                        {order.paymentStatus === 'paid' ? 'Paid' : order.paymentStatus === 'cod' ? 'Cash Counter' : 'Pending'}
                       </span>
                     </div>
                   </div>
@@ -212,7 +218,8 @@ const Orders = () => {
                     to="/pickup"
                     className="flex-1 min-w-[140px] bg-amber hover:bg-amber-dark text-stone-950 text-xs font-black py-2.5 px-4 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5"
                   >
-                    <span>🎟️ Pickup Token</span>
+                    <Ticket className="w-3.5 h-3.5" />
+                    <span>Pickup Token</span>
                   </Link>
                   {isOrderActive(order.status) && (
                     <Link

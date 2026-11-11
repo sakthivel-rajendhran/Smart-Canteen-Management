@@ -1,5 +1,43 @@
 import mongoose from 'mongoose';
 
+const menuVariantSchema = new mongoose.Schema(
+  {
+    label: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    price: {
+      type: Number,
+      required: true,
+    },
+    available: {
+      type: Boolean,
+      default: true,
+    },
+    preparationTime: {
+      type: Number,
+      default: 5,
+    },
+    image: {
+      url: {
+        type: String,
+        default: '',
+      },
+      publicId: {
+        type: String,
+        default: '',
+      },
+    },
+    legacyMenuItemId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'MenuItem',
+      default: null,
+    },
+  },
+  { _id: true }
+);
+
 const menuItemSchema = new mongoose.Schema(
   {
     name: {
@@ -63,6 +101,16 @@ const menuItemSchema = new mongoose.Schema(
       type: Number, // in minutes
       default: 10,
     },
+    variants: {
+      type: [menuVariantSchema],
+      default: [],
+    },
+    variantParent: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'MenuItem',
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -72,6 +120,7 @@ const menuItemSchema = new mongoose.Schema(
 // Compound index for optimized category and status filtering
 menuItemSchema.index({ category: 1, available: 1, featured: 1 });
 menuItemSchema.index({ categories: 1, available: 1, featured: 1 });
+menuItemSchema.index({ variantParent: 1, available: 1 });
 
 const MenuItem = mongoose.model('MenuItem', menuItemSchema);
 export default MenuItem;

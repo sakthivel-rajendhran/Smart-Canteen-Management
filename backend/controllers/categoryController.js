@@ -5,10 +5,14 @@ import { cache } from '../utils/cache.js';
 
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Helper to attach assigned menu item counts to category records (supports multi-category items)
+// Helper to attach assigned menu item counts to category records (supports multi-category items, excluding archived variant siblings)
 const attachItemCounts = async (categories) => {
   if (!Array.isArray(categories) || categories.length === 0) return [];
-  const items = await MenuItem.find({}).select('category categories').lean();
+  const items = await MenuItem.find({
+    $or: [{ variantParent: null }, { variantParent: { $exists: false } }],
+  })
+    .select('category categories')
+    .lean();
   const countMap = new Map();
 
   for (const item of items) {
@@ -226,7 +230,10 @@ const deleteCategory = async (req, res) => {
     }
 
     const assignedCount = await MenuItem.countDocuments({
-      $or: [{ category: category._id }, { categories: category._id }],
+      $and: [
+        { $or: [{ variantParent: null }, { variantParent: { $exists: false } }] },
+        { $or: [{ category: category._id }, { categories: category._id }] },
+      ],
     });
     if (assignedCount > 0) {
       return res.status(400).json({
