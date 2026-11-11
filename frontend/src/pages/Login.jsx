@@ -39,6 +39,21 @@ const GoogleLogo = () => (
   </svg>
 );
 
+const formatFirebaseAuthError = (err) => {
+  if (err?.code === 'auth/unauthorized-domain') {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+    return `Domain "${host}" is not authorized in Firebase Authentication. Add "${host}" under Firebase Console → Authentication → Settings → Authorized domains.`;
+  }
+  if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+    return 'Google sign-in popup was closed. Please try again.';
+  }
+  return (
+    err?.response?.data?.message ||
+    err?.message ||
+    'Unable to authenticate with Google via Firebase.'
+  );
+};
+
 const loadGoogleIdentityScript = () =>
   new Promise((resolve, reject) => {
     if (window.google?.accounts?.id) {
@@ -136,7 +151,7 @@ const Login = () => {
         }
       } catch (err) {
         if (active) {
-          setError(err.response?.data?.message || err.message || 'Firebase Google sign-in failed.');
+          setError(formatFirebaseAuthError(err));
           setGoogleSubmitting(false);
         }
       }
@@ -300,13 +315,7 @@ const Login = () => {
           await fb.signInWithRedirect(fb.auth, fb.googleProvider);
           return;
         }
-        if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
-          setError('Google sign-in popup was closed. Please try again.');
-        } else {
-          setError(
-            err.response?.data?.message || err.message || 'Unable to authenticate with Google via Firebase.'
-          );
-        }
+        setError(formatFirebaseAuthError(err));
         setGoogleSubmitting(false);
       }
       return;
