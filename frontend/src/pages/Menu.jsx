@@ -1,9 +1,16 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import API from '../services/api';
 import MenuCacheService from '../services/menuCache';
+import {
+  itemHasActiveCategory,
+  itemMatchesCategory,
+  itemMatchesCategorySearch,
+  syncItemCategoryUpdate,
+} from '../utils/categoryHelpers';
 import FoodCard from '../components/food/FoodCard';
 import FoodDetailModal from '../components/food/FoodDetailModal';
 import MenuSkeleton from '../components/skeletons/MenuSkeleton';
@@ -19,8 +26,19 @@ import {
 } from 'lucide-react';
 
 const Menu = () => {
-  const { cart, addToCart, changeQuantity } = useCart();
+  const {
+    cart,
+    addToCart,
+    changeQuantity,
+    getItemQuantity,
+    parcelEnabled,
+    parcelChargePerItem,
+    foodSubtotal,
+    parcelChargeTotal,
+  } = useCart();
+  const { user } = useAuth();
   const { socket } = useSocket();
+  const hasMobileBottomNav = Boolean(user && user.role !== 'admin' && user.role !== 'ADMIN');
 
   const [categories, setCategories] = useState(() => MenuCacheService.getCategories() || []);
   const [menuItems, setMenuItems] = useState(() => MenuCacheService.getMenu() || []);
@@ -119,18 +137,7 @@ const Menu = () => {
       }
 
       setMenuItems((prev) => {
-        const updated = prev.map((item) =>
-          item.category?._id === updatedCat._id
-            ? {
-                ...item,
-                category: {
-                  ...item.category,
-                  name: updatedCat.name,
-                  active: updatedCat.active,
-                },
-              }
-            : item
-        );
+        const updated = prev.map((item) => syncItemCategoryUpdate(item, updatedCat));
         MenuCacheService.setMenu(updated);
         return updated;
       });
@@ -197,23 +204,22 @@ const Menu = () => {
     return item ? item.quantity : 0;
   };
 
-  // Exclude any food item whose category was deactivated
+  // Exclude items whose assigned categories are all deactivated
   const activeMenuItems = useMemo(() => {
-    return menuItems.filter((item) => item.category && item.category.active !== false);
+    return menuItems.filter((item) => itemHasActiveCategory(item));
   }, [menuItems]);
 
-  // Filter items efficiently
+  // Filter items efficiently (supports primary + multi-category items)
   const filteredItems = useMemo(() => {
     return activeMenuItems.filter((item) => {
-      const matchesCategory =
-        activeCategory === 'all' || item.category?._id === activeCategory;
+      const matchesCategory = itemMatchesCategory(item, activeCategory);
 
       const q = debouncedQuery.toLowerCase().trim();
       const matchesSearch =
         !q ||
         item.name.toLowerCase().includes(q) ||
         (item.description && item.description.toLowerCase().includes(q)) ||
-        (item.category?.name && item.category.name.toLowerCase().includes(q));
+        itemMatchesCategorySearch(item, q);
 
       const matchesAvailable = !onlyAvailable || item.available !== false;
       const matchesFeatured = !onlyFeatured || Boolean(item.featured);
@@ -222,7 +228,7 @@ const Menu = () => {
     });
   }, [activeMenuItems, activeCategory, debouncedQuery, onlyAvailable, onlyFeatured]);
 
-  const cartTotal = cart.reduce((acc, item) => acc + item.price * item.quantity, 0);
+  const cartTotal = Number((foodSubtotal + parcelChargeTotal).toFixed(2));
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
   const getCategoryTabClass = (isSelected) =>
@@ -233,7 +239,7 @@ const Menu = () => {
     }`;
 
   return (
-    <div className="bg-cream min-h-screen">
+    <div className="bg-cream min-h-screen overflow-x-clip">
       {/* Hero Header Banner */}
       <div className="relative bg-gradient-to-br from-primary-darker via-primary-dark to-[#165032] py-12 md:py-16 px-[5%] text-center text-white overflow-hidden shadow-md">
         <div className="absolute -right-20 -top-20 w-72 h-72 bg-amber/15 rounded-full blur-3xl pointer-events-none" />
@@ -306,12 +312,22 @@ const Menu = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="max-w-7xl mx-auto px-4 py-8 pb-36">
+      <div
+        className={`max-w-7xl mx-auto px-4 py-8 ${
+          cartCount > 0
+            ? hasMobileBottomNav
+              ? 'pb-48 md:pb-32'
+              : 'pb-32'
+            : hasMobileBottomNav
+            ? 'pb-28 md:pb-16'
+            : 'pb-16'
+        }`}
+      >
         {/* Search & Mobile Filter Row */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 mb-8">
           {/* Search Box */}
           <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-4 top-3.5 w-4.5 h-4.5 text-gray-400" />
+            <Search className="absolute left-4 top-3.5 w-4 h-4 text-gray-400" />
             <input
               type="text"
               value={searchQuery}
@@ -405,8 +421,12 @@ const Menu = () => {
                 key={item._id}
                 item={item}
                 quantity={getQtyInCart(item._id)}
-                onAdd={(itemToAdd) => addToCart(itemToAdd, 1)}
-                onChangeQty={(id, delta) => changeQuantity(id, delta)}
+                normalQty={getItemQuantity(item._id, 'NORMAL')}
+                parcelQty={getItemQuantity(item._id, 'PARCEL')}
+                parcelEnabled={parcelEnabled}
+                parcelChargePerItem={parcelChargePerItem}
+                onAdd={(itemToAdd, svc = 'NORMAL') => addToCart(itemToAdd, 1, svc)}
+                onChangeQty={(id, delta, svc = 'NORMAL') => changeQuantity(id, delta, svc)}
                 onOpenDetail={(itemToOpen) => setSelectedFood(itemToOpen)}
               />
             ))}
@@ -414,25 +434,32 @@ const Menu = () => {
         )}
       </div>
 
-      {/* Floating Tray Summary Bar */}
+      {/* Floating Tray Summary Bar (Positioned cleanly above mobile bottom navigation with safe-area support) */}
       {cartCount > 0 && (
-        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 w-[92%] max-w-xl bg-primary-darker/95 backdrop-blur-md text-white p-4 md:p-4.5 rounded-3xl shadow-2xl shadow-primary-darker/50 flex items-center justify-between z-40 border border-white/10 hover:bg-primary-dark transition-all">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-amber text-primary-darker font-bold rounded-2xl flex items-center justify-center shadow-md">
+        <div
+          className={`fixed left-1/2 -translate-x-1/2 w-[calc(100%-24px)] sm:w-[92%] max-w-xl bg-primary-darker/95 backdrop-blur-md text-white p-3 sm:p-4 rounded-2xl sm:rounded-3xl shadow-2xl shadow-primary-darker/50 flex items-center justify-between gap-3 z-40 border border-white/10 hover:bg-primary-dark transition-all ${
+            hasMobileBottomNav
+              ? 'bottom-[calc(80px+env(safe-area-inset-bottom,0px))] md:bottom-6'
+              : 'bottom-[calc(16px+env(safe-area-inset-bottom,0px))] md:bottom-6'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 bg-amber text-primary-darker font-bold rounded-xl sm:rounded-2xl flex items-center justify-center shadow-md shrink-0">
               <ShoppingCart className="w-5 h-5" />
             </div>
-            <div>
-              <span className="text-xs text-white/70 font-semibold block">
+            <div className="min-w-0">
+              <span className="text-[11px] sm:text-xs text-white/75 font-semibold block truncate">
                 {cartCount} Dish{cartCount > 1 ? 'es' : ''} in your Tray
+                {parcelChargeTotal > 0 ? ` • +₹${parcelChargeTotal} parcel` : ''}
               </span>
-              <span className="font-outfit font-black text-lg text-amber">
+              <span className="font-outfit font-black text-base sm:text-lg text-amber block leading-tight">
                 ₹{cartTotal} Total
               </span>
             </div>
           </div>
           <Link
             to="/cart"
-            className="bg-amber hover:bg-amber-dark text-primary-darker font-outfit font-black text-xs md:text-sm px-6 py-3 rounded-2xl transition-all shadow-lg active:scale-95 flex items-center gap-1.5"
+            className="bg-amber hover:bg-amber-dark text-primary-darker font-outfit font-black text-xs sm:text-sm px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl transition-all shadow-lg active:scale-95 flex items-center gap-1.5 shrink-0 whitespace-nowrap"
           >
             <span>Proceed to Tray</span> →
           </Link>
@@ -444,8 +471,10 @@ const Menu = () => {
         item={selectedFood}
         isOpen={Boolean(selectedFood)}
         onClose={() => setSelectedFood(null)}
-        initialQty={selectedFood ? getQtyInCart(selectedFood._id) || 1 : 1}
-        onAddToCart={(item, qty) => addToCart(item, qty)}
+        initialQty={1}
+        parcelEnabled={parcelEnabled}
+        parcelChargePerItem={parcelChargePerItem}
+        onAddToCart={(item, qty, svc = 'NORMAL') => addToCart(item, qty, svc)}
       />
     </div>
   );

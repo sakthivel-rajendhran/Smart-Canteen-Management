@@ -450,6 +450,11 @@ const Categories = () => {
                             <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-cream border border-border text-muted">
                               {itemCount} {itemCount === 1 ? 'item' : 'items'}
                             </span>
+                            {cat.parcelEligible === false && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-stone-100 border border-stone-200 text-stone-600">
+                                Normal Only (No Parcel)
+                              </span>
+                            )}
                           </div>
                         </td>
 

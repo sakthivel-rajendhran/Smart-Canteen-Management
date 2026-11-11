@@ -4,6 +4,11 @@ import Order from '../models/Order.js';
 import User from '../models/User.js';
 import MenuItem from '../models/MenuItem.js';
 import CanteenSettings from '../models/CanteenSettings.js';
+import {
+  getOrCreateParcelSettings,
+  isItemParcelEligible,
+  resolveItemParcelPricing,
+} from '../utils/parcelHelper.js';
 import generateOrderCode from '../utils/generateOrderCode.js';
 import {
   createAndEmitNotification,
@@ -57,10 +62,15 @@ export const createWalkInOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid item ID found in billing cart.' });
     }
 
-    const dbItems = await MenuItem.find({ _id: { $in: itemIds } }).lean();
+    const dbItems = await MenuItem.find({ _id: { $in: itemIds } })
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible')
+      .lean();
     const dbItemMap = new Map(dbItems.map((item) => [item._id.toString(), item]));
+    const { parcelEnabled, parcelChargePerItem } = await getOrCreateParcelSettings();
 
     let subtotal = 0;
+    let parcelChargeTotal = 0;
     const verifiedItems = [];
 
     for (const item of items) {
@@ -79,8 +89,18 @@ export const createWalkInOrder = async (req, res) => {
       }
 
       const qty = Math.max(1, parseInt(item.quantity, 10) || 1);
-      const itemTotal = Number(dbItem.price) * qty;
-      subtotal += itemTotal;
+      const pricing = resolveItemParcelPricing({
+        rawServiceType: item.serviceType,
+        quantity: qty,
+        unitFoodPrice: Number(dbItem.price),
+        parcelEnabled,
+        parcelChargePerItem,
+        itemParcelEligible: isItemParcelEligible(dbItem),
+        itemName: dbItem.name,
+      });
+
+      subtotal += pricing.itemFoodTotal;
+      parcelChargeTotal += pricing.parcelChargeTotal;
 
       verifiedItems.push({
         menuItem: dbItem._id,
@@ -89,11 +109,17 @@ export const createWalkInOrder = async (req, res) => {
         quantity: qty,
         emoji: dbItem.emoji || '🍛',
         image: dbItem.image?.url || '',
+        serviceType: pricing.serviceType,
+        parcelChargePerUnit: pricing.parcelChargePerUnit,
+        parcelChargeTotal: pricing.parcelChargeTotal,
+        itemSubtotal: pricing.itemSubtotal,
       });
     }
 
-    const discountAmount = Math.max(0, Math.min(subtotal, Number(discount) || 0));
-    const grandTotal = Math.max(0, subtotal - discountAmount);
+    subtotal = Number(subtotal.toFixed(2));
+    parcelChargeTotal = Number(parcelChargeTotal.toFixed(2));
+    const discountAmount = Math.max(0, Math.min(subtotal + parcelChargeTotal, Number(discount) || 0));
+    const grandTotal = Math.max(0, Number((subtotal + parcelChargeTotal - discountAmount).toFixed(2)));
 
     // 2. Generate unique order code & consistent pickup token
     const orderCode = await generateOrderCode();
@@ -116,6 +142,8 @@ export const createWalkInOrder = async (req, res) => {
         staffId: walkInCustomer.staffId?.trim() || '',
       },
       items: verifiedItems,
+      foodSubtotal: subtotal,
+      parcelChargeTotal,
       subtotal,
       discount: discountAmount,
       total: grandTotal,
@@ -159,7 +187,7 @@ export const createWalkInOrder = async (req, res) => {
     });
   } catch (error) {
     console.error('POS Walk-in creation error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -643,4 +671,68 @@ export const cleanupExpiredBills = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// @desc    Get Admin Parcel Configuration
+// @route   GET /api/admin/settings/parcel
+// @access  Private/Admin
+export const getAdminParcelSettings = async (req, res) => {
+  try {
+    const { parcelEnabled, parcelChargePerItem } = await getOrCreateParcelSettings();
+    res.json({
+      success: true,
+      data: { parcelEnabled, parcelChargePerItem },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Update Admin Parcel Configuration
+// @route   PUT /api/admin/settings/parcel
+// @access  Private/Admin
+export const updateAdminParcelSettings = async (req, res) => {
+  try {
+    const { parcelEnabled, parcelChargePerItem } = req.body;
+    const { settings } = await getOrCreateParcelSettings();
+
+    if (parcelEnabled !== undefined) {
+      if (typeof parcelEnabled !== 'boolean') {
+        return res.status(400).json({ success: false, message: 'parcelEnabled must be a boolean.' });
+      }
+      settings.parcelEnabled = parcelEnabled;
+    }
+
+    if (parcelChargePerItem !== undefined) {
+      const numericCharge = Number(parcelChargePerItem);
+      if (parcelChargePerItem === '' || parcelChargePerItem === null || !Number.isFinite(numericCharge)) {
+        return res.status(400).json({ success: false, message: 'Parcel charge must be a valid number.' });
+      }
+      if (numericCharge < 0) {
+        return res.status(400).json({ success: false, message: 'Parcel charge cannot be negative.' });
+      }
+      settings.parcelChargePerItem = Number(numericCharge.toFixed(2));
+    }
+
+    await settings.save();
+
+    const updatedPayload = {
+      parcelEnabled: settings.parcelEnabled !== false,
+      parcelChargePerItem: Number(settings.parcelChargePerItem ?? 5),
+    };
+
+    const io = req.app.get('socketio');
+    if (io) {
+      io.emit('parcel:settingsUpdated', updatedPayload);
+    }
+
+    res.json({
+      success: true,
+      message: 'Parcel settings saved successfully.',
+      data: updatedPayload,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 

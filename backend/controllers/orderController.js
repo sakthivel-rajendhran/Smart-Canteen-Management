@@ -4,6 +4,12 @@ import Order from '../models/Order.js';
 import MenuItem from '../models/MenuItem.js';
 import Coupon from '../models/Coupon.js';
 import User from '../models/User.js';
+import { isGlobalCouponsEnabled } from './couponController.js';
+import {
+  getOrCreateParcelSettings,
+  isItemParcelEligible,
+  resolveItemParcelPricing,
+} from '../utils/parcelHelper.js';
 import generateOrderCode from '../utils/generateOrderCode.js';
 import {
   createAndEmitNotification,
@@ -53,11 +59,14 @@ const createOrder = async (req, res) => {
     }
 
     const dbItems = await MenuItem.find({ _id: { $in: itemIds } })
-      .populate('category', 'name active')
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible')
       .lean();
     const dbItemMap = new Map(dbItems.map((item) => [item._id.toString(), item]));
+    const { parcelEnabled, parcelChargePerItem } = await getOrCreateParcelSettings();
 
     let subtotal = 0;
+    let parcelChargeTotal = 0;
     const verifiedItems = [];
 
     for (const item of items) {
@@ -74,10 +83,14 @@ const createOrder = async (req, res) => {
         return res.status(404).json({ success: false, message: `Menu item not found: ${item.name || item.menuItem}` });
       }
 
-      if (dbItem.category && dbItem.category.active === false) {
+      const assignedCats = [
+        dbItem.category,
+        ...(Array.isArray(dbItem.categories) ? dbItem.categories : []),
+      ].filter(Boolean);
+      if (assignedCats.length > 0 && !assignedCats.some((c) => c.active !== false)) {
         return res.status(400).json({
           success: false,
-          message: `"${dbItem.name}" belongs to an inactive category ("${dbItem.category.name}") and cannot be ordered right now.`
+          message: `"${dbItem.name}" belongs to an inactive category ("${dbItem.category?.name || 'Inactive'}") and cannot be ordered right now.`
         });
       }
 
@@ -88,8 +101,18 @@ const createOrder = async (req, res) => {
         });
       }
 
-      const itemTotal = dbItem.price * qty;
-      subtotal += itemTotal;
+      const pricing = resolveItemParcelPricing({
+        rawServiceType: item.serviceType,
+        quantity: qty,
+        unitFoodPrice: dbItem.price,
+        parcelEnabled,
+        parcelChargePerItem,
+        itemParcelEligible: isItemParcelEligible(dbItem),
+        itemName: dbItem.name,
+      });
+
+      subtotal += pricing.itemFoodTotal;
+      parcelChargeTotal += pricing.parcelChargeTotal;
 
       verifiedItems.push({
         menuItem: dbItem._id,
@@ -98,14 +121,33 @@ const createOrder = async (req, res) => {
         quantity: qty,
         emoji: dbItem.emoji,
         image: (dbItem.image && typeof dbItem.image === 'object' ? dbItem.image.url : dbItem.image) || '',
+        serviceType: pricing.serviceType,
+        parcelChargePerUnit: pricing.parcelChargePerUnit,
+        parcelChargeTotal: pricing.parcelChargeTotal,
+        itemSubtotal: pricing.itemSubtotal,
       });
     }
 
-    // 2. Validate coupon discount
+    subtotal = Number(subtotal.toFixed(2));
+    parcelChargeTotal = Number(parcelChargeTotal.toFixed(2));
+
+    // 2. Validate coupon discount (enforcing Admin global setting and coupon rules on backend)
     let discount = 0;
-    if (couponCode) {
-      const coupon = await Coupon.findOne({ code: couponCode.toUpperCase(), active: true });
-      if (coupon && new Date(coupon.expiryDate) > new Date() && subtotal >= coupon.minimumOrder) {
+    let appliedCouponCode = '';
+    if (couponCode && String(couponCode).trim()) {
+      const globalEnabled = await isGlobalCouponsEnabled();
+      if (!globalEnabled) {
+        return res.status(400).json({
+          success: false,
+          message: 'Coupons are currently disabled by the canteen admin and cannot be applied to orders.',
+        });
+      }
+
+      const cleanCode = String(couponCode).trim().toUpperCase();
+      const coupon = await Coupon.findOne({ code: cleanCode, active: true });
+      const withinUsageLimit = coupon && (coupon.usageLimit === 0 || coupon.usedCount < coupon.usageLimit);
+
+      if (coupon && withinUsageLimit && new Date(coupon.expiryDate) > new Date() && subtotal >= coupon.minimumOrder) {
         if (coupon.discountType === 'flat') {
           discount = coupon.discountValue;
         } else if (coupon.discountType === 'percentage') {
@@ -115,14 +157,15 @@ const createOrder = async (req, res) => {
           }
         }
         discount = Math.min(subtotal, discount);
-        
+        appliedCouponCode = coupon.code;
+
         // Increment coupon usage
         coupon.usedCount += 1;
         await coupon.save();
       }
     }
 
-    const total = subtotal - discount;
+    const total = Math.max(0, Number((subtotal + parcelChargeTotal - discount).toFixed(2)));
     const orderCode = await generateOrderCode();
     const pickupToken = orderCode; // Consistent DRS-XXXX format
     const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
@@ -134,10 +177,12 @@ const createOrder = async (req, res) => {
       pickupSecret,
       user: req.user._id,
       items: verifiedItems,
+      foodSubtotal: subtotal,
+      parcelChargeTotal,
       subtotal,
       discount,
       total,
-      coupon: couponCode || '',
+      coupon: appliedCouponCode,
       paymentMethod,
       paymentStatus: paymentMethod === 'cod' ? 'cod' : 'pending',
       paymentId: paymentId || '',
@@ -196,7 +241,7 @@ const createOrder = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -236,7 +281,7 @@ const getMyOrders = async (req, res) => {
     const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
     res.json({ success: true, data: orders });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -264,7 +309,7 @@ const getOrderById = async (req, res) => {
 
     res.json({ success: true, data: order });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -391,7 +436,7 @@ const updateOrderStatus = async (req, res) => {
 
     res.json({ success: true, message: `Order status updated to ${status}`, data: order });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -489,7 +534,7 @@ const cancelOrder = async (req, res) => {
 
     res.json({ success: true, message: 'Order cancelled successfully', data: order });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -527,7 +572,7 @@ const getAdminOrders = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -581,7 +626,7 @@ const getActiveOrders = async (req, res) => {
       data: orders,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -616,6 +661,21 @@ const getPublicReadyTokens = async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get Public Parcel Settings (enable flag & per-item charge)
+// @route   GET /api/orders/parcel-settings
+// @access  Public
+const getParcelSettings = async (req, res) => {
+  try {
+    const { parcelEnabled, parcelChargePerItem } = await getOrCreateParcelSettings();
+    res.json({
+      success: true,
+      data: { parcelEnabled, parcelChargePerItem },
+    });
+  } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -629,4 +689,5 @@ export {
   getAdminOrders,
   getActiveOrders,
   getPublicReadyTokens,
+  getParcelSettings,
 };

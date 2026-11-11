@@ -231,9 +231,18 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
     ? order.walkInCustomer?.staffId
     : order.user?.staffDetails?.staffId;
 
-  const subtotal = Number(order.subtotal || order.total || 0);
+  const parcelChargeTotal = Number(
+    order.parcelChargeTotal ??
+      order.items?.reduce((sum, item) => sum + Number(item.parcelChargeTotal || 0), 0) ??
+      0
+  );
   const discount = Number(order.discount || 0);
   const total = Number(order.total || 0);
+  const subtotal = Number(
+    order.foodSubtotal ??
+      order.subtotal ??
+      Math.max(0, total + discount - parcelChargeTotal)
+  );
 
   const paymentMethodUpper = String(order.paymentMethod || 'cash').toUpperCase();
   const paymentStatusUpper = String(order.paymentStatus || 'paid').toUpperCase();
@@ -499,15 +508,44 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
 
               <div className="divide-y divide-dashed divide-stone-300">
                 {order.items?.map((item, idx) => {
-                  const lineTotal = (Number(item.price || 0) * Number(item.quantity || 1)).toFixed(2);
+                  const unitPrice = Number(item.price || 0);
+                  const qty = Number(item.quantity || 1);
+                  const foodLineTotal = Number((unitPrice * qty).toFixed(2));
+                  const itemParcelUnit = Number(item.parcelChargePerUnit || 0);
+                  const itemParcelTotal = Number(
+                    item.parcelChargeTotal ?? (item.serviceType === 'PARCEL' ? itemParcelUnit * qty : 0)
+                  );
+                  const isParcel = item.serviceType === 'PARCEL' || itemParcelTotal > 0;
+
                   return (
-                    <div key={idx} className={`thermal-avoid-break py-1 flex items-start ${is58mm ? 'text-[10px]' : 'text-[11px]'}`}>
-                      <div className="flex-1 pr-1">
-                        <div className="font-bold leading-tight break-words">{item.name}</div>
-                        <div className={`${is58mm ? 'text-[9px]' : 'text-[10px]'} text-stone-600`}>@ ₹{Number(item.price || 0).toFixed(2)}</div>
+                    <div key={idx} className={`thermal-avoid-break py-1 ${is58mm ? 'text-[10px]' : 'text-[11px]'}`}>
+                      <div className="flex items-start">
+                        <div className="flex-1 pr-1">
+                          <div className="font-bold leading-tight break-words">
+                            {item.name}
+                            {isParcel && (
+                              <span className={`${is58mm ? 'text-[8px]' : 'text-[9px]'} font-black uppercase ml-1`}>
+                                [PARCEL]
+                              </span>
+                            )}
+                          </div>
+                          <div className={`${is58mm ? 'text-[9px]' : 'text-[10px]'} text-stone-600`}>
+                            @ ₹{unitPrice.toFixed(2)} {!isParcel ? '• Normal' : ''}
+                          </div>
+                        </div>
+                        <div className={`${is58mm ? 'w-7' : 'w-9'} text-center font-bold pt-0.5`}>{qty}</div>
+                        <div className={`${is58mm ? 'w-14' : 'w-16'} text-right font-black pt-0.5`}>
+                          ₹{foodLineTotal.toFixed(2)}
+                        </div>
                       </div>
-                      <div className={`${is58mm ? 'w-7' : 'w-9'} text-center font-bold pt-0.5`}>{item.quantity}</div>
-                      <div className={`${is58mm ? 'w-14' : 'w-16'} text-right font-black pt-0.5`}>₹{lineTotal}</div>
+                      {isParcel && itemParcelTotal > 0 && (
+                        <div className={`flex justify-between items-center mt-0.5 ${is58mm ? 'text-[9px]' : 'text-[10px]'} text-stone-700`}>
+                          <span>
+                            Parcel ({qty} × ₹{(itemParcelUnit || itemParcelTotal / qty).toFixed(2)})
+                          </span>
+                          <span className="font-bold">+₹{itemParcelTotal.toFixed(2)}</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -519,9 +557,16 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
             {/* Totals */}
             <div className={`thermal-avoid-break space-y-1 ${is58mm ? 'text-[10px]' : 'text-[11px]'}`}>
               <div className="flex justify-between">
-                <span className="font-semibold">Subtotal</span>
+                <span className="font-semibold">Food Subtotal</span>
                 <span className="font-bold">₹{subtotal.toFixed(2)}</span>
               </div>
+
+              {parcelChargeTotal > 0 && (
+                <div className="flex justify-between">
+                  <span className="font-semibold">Parcel Charges</span>
+                  <span className="font-bold">+₹{parcelChargeTotal.toFixed(2)}</span>
+                </div>
+              )}
 
               {discount > 0 && (
                 <div className="flex justify-between text-stone-700">

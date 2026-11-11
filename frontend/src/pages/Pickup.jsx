@@ -397,28 +397,43 @@ const Pickup = () => {
                           Ordered Items ({order.items?.length || 0})
                         </span>
                         <div className="space-y-1">
-                          {order.items?.map((item, idx) => (
-                            <div key={idx} className="flex justify-between items-center text-stone-800">
-                              <span className="font-semibold truncate mr-2">
-                                {item.name}
-                              </span>
-                              <span className="font-black font-mono text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200 text-[11px]">
-                                ×{item.quantity}
-                              </span>
-                            </div>
-                          ))}
+                          {order.items?.map((item, idx) => {
+                            const isParcel = item.serviceType === 'PARCEL' || Number(item.parcelChargeTotal || 0) > 0;
+                            return (
+                              <div key={idx} className="flex justify-between items-center text-stone-800 gap-2">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="font-semibold truncate">
+                                    {item.name}
+                                  </span>
+                                  {isParcel && (
+                                    <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber/20 text-amber-dark shrink-0">
+                                      Parcel{Number(item.parcelChargeTotal || 0) > 0 ? ` +₹${Number(item.parcelChargeTotal)}` : ''}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="font-black font-mono text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200 text-[11px] shrink-0">
+                                  ×{item.quantity}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
 
                       {/* Payment & Financial Row */}
-                      <div className="flex flex-wrap items-center justify-between text-xs pt-2 border-t border-stone-100">
+                      <div className="flex flex-wrap items-center justify-between text-xs pt-2 border-t border-stone-100 gap-2">
                         <div className="flex items-center gap-2">
                           <span className="text-stone-500 font-medium">Payment Mode:</span>
                           <span className="font-bold uppercase text-stone-800 font-mono">
                             {order.paymentMethod} ({order.paymentStatus})
                           </span>
                         </div>
-                        <div className="flex items-baseline gap-1">
+                        <div className="flex items-baseline gap-1.5 flex-wrap">
+                          {Number(order.parcelChargeTotal || 0) > 0 && (
+                            <span className="text-[11px] font-bold text-amber-dark">
+                              (Parcel ₹{Number(order.parcelChargeTotal).toFixed(2)})
+                            </span>
+                          )}
                           <span className="text-stone-500 font-medium">Total:</span>
                           <span className="font-outfit font-black text-base text-stone-900">
                             ₹{Number(order.total || 0).toFixed(2)}

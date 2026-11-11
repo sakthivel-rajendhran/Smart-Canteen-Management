@@ -565,15 +565,20 @@ const BillHistory = () => {
 
                         {/* Items */}
                         <td className="py-3.5 px-4">
-                          <div className="text-stone-700 font-medium line-clamp-1 max-w-[200px]" title={bill.items?.map(i => `${i.name} (x${i.quantity})`).join(', ')}>
+                          <div className="text-stone-700 font-medium line-clamp-1 max-w-[220px]" title={bill.items?.map(i => `${i.name} (x${i.quantity}${i.serviceType === 'PARCEL' ? ', Parcel' : ''})`).join(', ')}>
                             {bill.items?.map((item, idx) => (
                               <span key={idx}>
-                                {item.name} ×{item.quantity}{idx < bill.items.length - 1 ? ', ' : ''}
+                                {item.name} ×{item.quantity}{item.serviceType === 'PARCEL' ? ' [P]' : ''}{idx < bill.items.length - 1 ? ', ' : ''}
                               </span>
                             ))}
                           </div>
                           <span className="text-[10px] text-stone-400">
                             {bill.items?.length || 0} item(s)
+                            {Number(bill.parcelChargeTotal || 0) > 0 && (
+                              <span className="ml-1.5 text-amber-dark font-bold">
+                                • Parcel ₹{Number(bill.parcelChargeTotal).toFixed(2)}
+                              </span>
+                            )}
                           </span>
                         </td>
 

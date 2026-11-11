@@ -1,18 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Clock, Sparkles, Plus, Minus, ShoppingCart, CheckCircle, AlertCircle } from 'lucide-react';
+import { getItemCategories, isItemParcelEligible } from '../../utils/categoryHelpers';
 
-const FoodDetailModal = ({ item, isOpen, onClose, onAddToCart, initialQty = 1 }) => {
+const FoodDetailModal = ({
+  item,
+  isOpen,
+  onClose,
+  onAddToCart,
+  initialQty = 1,
+  parcelEnabled = true,
+  parcelChargePerItem = 5,
+}) => {
   const [qty, setQty] = useState(initialQty > 0 ? initialQty : 1);
+  const [serviceType, setServiceType] = useState('NORMAL');
   const [addedMessage, setAddedMessage] = useState(false);
+
+  useEffect(() => {
+    setQty(initialQty > 0 ? initialQty : 1);
+    setServiceType('NORMAL');
+    setAddedMessage(false);
+  }, [item?._id, isOpen, initialQty]);
 
   if (!isOpen || !item) return null;
 
   const imageUrl = item.image?.url || (typeof item.image === 'string' ? item.image : '') || '';
   const isAvailable = item.available !== false;
+  const itemParcelEligible = isItemParcelEligible(item);
+  const canSelectParcel = parcelEnabled && itemParcelEligible;
+  const effectiveServiceType = canSelectParcel ? serviceType : 'NORMAL';
+  const parcelPerUnit = effectiveServiceType === 'PARCEL' ? Number(parcelChargePerItem) : 0;
+  const computedTotal = Number(((Number(item.price) + parcelPerUnit) * qty).toFixed(2));
 
   const handleAdd = () => {
     if (!isAvailable) return;
-    onAddToCart(item, qty);
+    onAddToCart(item, qty, effectiveServiceType);
     setAddedMessage(true);
     setTimeout(() => {
       setAddedMessage(false);
@@ -61,7 +82,10 @@ const FoodDetailModal = ({ item, isOpen, onClose, onAddToCart, initialQty = 1 })
               </span>
             )}
             <span className="bg-white/90 backdrop-blur-md text-primary-dark font-bold text-[11px] px-3 py-1 rounded-full shadow-md">
-              {item.category?.name || 'Canteen'}
+              {getItemCategories(item)
+                .map((c) => c.name)
+                .filter(Boolean)
+                .join(' · ') || item.category?.name || 'Canteen'}
             </span>
           </div>
 
@@ -99,6 +123,47 @@ const FoodDetailModal = ({ item, isOpen, onClose, onAddToCart, initialQty = 1 })
           <p className="text-muted text-sm leading-relaxed mb-6 border-b border-border pb-4">
             {item.description || 'Prepared fresh daily with traditional South Indian spices and highest hygiene standards.'}
           </p>
+
+          {/* Service Type Selector (Shown ONLY for parcel-eligible categories when enabled) */}
+          {isAvailable && canSelectParcel && (
+            <div className="mb-4">
+              <span className="font-outfit font-bold text-xs uppercase tracking-wider text-muted block mb-2">
+                Serving Option
+              </span>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setServiceType('NORMAL')}
+                  className={`p-3 rounded-2xl border text-left transition-all ${
+                    effectiveServiceType === 'NORMAL'
+                      ? 'bg-primary-dark text-white border-primary-dark shadow-md'
+                      : 'bg-cream/60 text-primary-dark border-border hover:border-primary/40'
+                  }`}
+                >
+                  <div className="font-outfit font-bold text-sm">Normal</div>
+                  <div className={`text-[11px] ${effectiveServiceType === 'NORMAL' ? 'text-white/75' : 'text-muted'}`}>
+                    Dine / Counter (₹0 extra)
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServiceType('PARCEL')}
+                  className={`p-3 rounded-2xl border text-left transition-all ${
+                    effectiveServiceType === 'PARCEL'
+                      ? 'bg-amber text-primary-darker border-amber shadow-md'
+                      : 'bg-cream/60 text-primary-dark border-border hover:border-amber/60'
+                  }`}
+                >
+                  <div className="font-outfit font-black text-sm">
+                    Parcel (+₹{parcelChargePerItem}/item)
+                  </div>
+                  <div className={`text-[11px] ${effectiveServiceType === 'PARCEL' ? 'text-primary-darker/80 font-semibold' : 'text-muted'}`}>
+                    Packed to go (+₹{Number(parcelChargePerItem) * qty} total)
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Quantity Selector */}
           {isAvailable && (
@@ -145,7 +210,7 @@ const FoodDetailModal = ({ item, isOpen, onClose, onAddToCart, initialQty = 1 })
                 onClick={handleAdd}
                 className="w-full bg-primary-dark hover:bg-primary text-white font-outfit font-black text-base py-3.5 rounded-2xl transition-all shadow-xl shadow-primary-dark/20 flex items-center justify-center gap-2 active:scale-98"
               >
-                <ShoppingCart className="w-5 h-5" /> Add {qty} to Cart • ₹{item.price * qty}
+                <ShoppingCart className="w-5 h-5" /> Add {qty} ({effectiveServiceType === 'PARCEL' ? 'Parcel' : 'Normal'}) • ₹{computedTotal}
               </button>
             )}
           </div>

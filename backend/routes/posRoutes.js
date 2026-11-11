@@ -9,6 +9,8 @@ import {
   getRetentionSettings,
   updateRetentionSettings,
   cleanupExpiredBills,
+  getAdminParcelSettings,
+  updateAdminParcelSettings,
 } from '../controllers/posController.js';
 import { protect } from '../middleware/authMiddleware.js';
 import { adminOnly } from '../middleware/adminMiddleware.js';
@@ -37,6 +39,11 @@ router.route('/settings/bill-retention')
   .put(updateRetentionSettings);
 
 router.post('/settings/bill-retention/cleanup', cleanupExpiredBills);
+
+// Parcel Option & Charge Settings
+router.route('/settings/parcel')
+  .get(getAdminParcelSettings)
+  .put(updateAdminParcelSettings);
 
 export default router;
 

@@ -138,20 +138,32 @@ const Orders = () => {
               <div className="p-6">
                 {/* Items List Summary */}
                 <div className="flex flex-wrap gap-2 mb-6">
-                  {order.items.map((item, idx) => (
-                    <span 
-                      key={idx}
-                      className="bg-gray-100 border border-gray-200 text-text rounded-full pl-1.5 pr-3 py-1 text-xs font-semibold flex items-center gap-1.5 shadow-2xs"
-                    >
-                      {item.image ? (
-                        <img src={item.image} alt={item.name} className="w-5 h-5 rounded-full object-cover border border-border" />
-                      ) : (
-                        <span>{item.emoji}</span>
-                      )}
-                      <span>{item.name}</span>
-                      <span className="text-muted font-bold ml-0.5">x{item.quantity}</span>
-                    </span>
-                  ))}
+                  {order.items.map((item, idx) => {
+                    const isParcel = item.serviceType === 'PARCEL' || Number(item.parcelChargeTotal || 0) > 0;
+                    return (
+                      <span 
+                        key={idx}
+                        className={`border rounded-full pl-1.5 pr-3 py-1 text-xs font-semibold flex items-center gap-1.5 shadow-2xs ${
+                          isParcel
+                            ? 'bg-amber-50 border-amber-200 text-stone-900'
+                            : 'bg-gray-100 border-gray-200 text-text'
+                        }`}
+                      >
+                        {item.image ? (
+                          <img src={item.image} alt={item.name} className="w-5 h-5 rounded-full object-cover border border-border" />
+                        ) : (
+                          <span>{item.emoji}</span>
+                        )}
+                        <span>{item.name}</span>
+                        <span className="text-muted font-bold ml-0.5">x{item.quantity}</span>
+                        {isParcel && (
+                          <span className="text-[10px] font-black uppercase px-1.5 py-0.2 rounded-full bg-amber text-stone-950">
+                            Parcel{Number(item.parcelChargeTotal || 0) > 0 ? ` +₹${Number(item.parcelChargeTotal)}` : ''}
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })}
                 </div>
 
                 {/* Info row */}
@@ -159,6 +171,11 @@ const Orders = () => {
                   <div>
                     <span className="text-[10px] text-muted font-bold uppercase tracking-wider block mb-0.5">Amount Paid</span>
                     <span className="font-outfit font-black text-2xl text-primary-dark">₹{order.total}</span>
+                    {Number(order.parcelChargeTotal || 0) > 0 && (
+                      <span className="text-[10px] text-amber-dark font-bold block mt-0.5">
+                        Includes ₹{Number(order.parcelChargeTotal)} parcel charge
+                      </span>
+                    )}
                     {order.discount > 0 && (
                       <span className="text-[10px] text-primary font-bold flex items-center gap-0.5 mt-0.5">
                         <Tag className="w-3 h-3" /> Saved ₹{order.discount}

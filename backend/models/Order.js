@@ -64,8 +64,31 @@ const orderSchema = new mongoose.Schema(
           type: String,
           default: '',
         },
+        serviceType: {
+          type: String,
+          enum: ['NORMAL', 'PARCEL'],
+          default: 'NORMAL',
+        },
+        parcelChargePerUnit: {
+          type: Number,
+          default: 0,
+        },
+        parcelChargeTotal: {
+          type: Number,
+          default: 0,
+        },
+        itemSubtotal: {
+          type: Number,
+        },
       },
     ],
+    foodSubtotal: {
+      type: Number,
+    },
+    parcelChargeTotal: {
+      type: Number,
+      default: 0,
+    },
     subtotal: {
       type: Number,
       required: true,

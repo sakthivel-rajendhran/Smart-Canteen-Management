@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { itemHasActiveCategory } from '../utils/categoryHelpers';
 
 const Home = () => {
   const { user } = useAuth();
@@ -47,7 +48,7 @@ const Home = () => {
 
         const cached = MenuCacheService.getFeatured();
         if (cached && cached.length > 0) {
-          const validFeatured = cached.filter((i) => i.category?.active !== false);
+          const validFeatured = cached.filter((i) => itemHasActiveCategory(i));
           setFeaturedItems(validFeatured.slice(0, 4));
           if (MenuCacheService.isFeaturedFresh() && MenuCacheService.isCategoriesFresh()) return;
         }

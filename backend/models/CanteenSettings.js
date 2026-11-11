@@ -28,6 +28,19 @@ const canteenSettingsSchema = new mongoose.Schema(
       type: String,
       default: 'DRS College of Engineering & Tech',
     },
+    couponsEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    parcelEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    parcelChargePerItem: {
+      type: Number,
+      default: 5,
+      min: 0,
+    },
   },
   {
     timestamps: true,

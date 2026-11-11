@@ -8,6 +8,7 @@ import {
   getAdminOrders,
   getActiveOrders,
   getPublicReadyTokens,
+  getParcelSettings,
 } from '../controllers/orderController.js';
 import { protect } from '../middleware/authMiddleware.js';
 import { adminOnly } from '../middleware/adminMiddleware.js';
@@ -24,6 +25,7 @@ router.get('/admin/list', protect, adminOnly, getAdminOrders);
 
 // Public route for Counter Live Pickup Display (No login required, safe public fields only)
 router.get('/public/ready-tokens', getPublicReadyTokens);
+router.get('/parcel-settings', getParcelSettings);
 
 router.route('/:id')
   .get(protect, getOrderById);

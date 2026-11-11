@@ -232,21 +232,53 @@ const Tracker = () => {
       <div className="bg-white border border-border p-6 md:p-8 rounded-3xl shadow-sm mb-8">
         <h3 className="font-outfit font-bold text-lg text-primary-dark mb-4 border-b border-border pb-3">Items Summary</h3>
         <div className="flex flex-col gap-4.5">
-          {order.items.map((item, idx) => (
-            <div key={idx} className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-3">
-                <span className="text-xl select-none">{item.emoji}</span>
-                <div>
-                  <span className="font-bold text-primary-dark block leading-none mb-1">{item.name}</span>
-                  <span className="text-[10px] text-muted font-semibold">₹{item.price} each</span>
+          {order.items.map((item, idx) => {
+            const isParcel = item.serviceType === 'PARCEL' || Number(item.parcelChargeTotal || 0) > 0;
+            const itemParcelTotal = Number(item.parcelChargeTotal || 0);
+            const itemLineTotal = Number(item.price) * Number(item.quantity) + itemParcelTotal;
+            return (
+              <div key={idx} className="flex items-center justify-between text-sm gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-xl select-none shrink-0">{item.emoji}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-primary-dark leading-none">{item.name}</span>
+                      <span
+                        className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border ${
+                          isParcel
+                            ? 'bg-amber/20 text-amber-dark border-amber/40'
+                            : 'bg-gray-100 text-muted border-gray-200'
+                        }`}
+                      >
+                        {isParcel ? 'Parcel' : 'Normal'}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-muted font-semibold block mt-0.5">
+                      ₹{item.price} each
+                      {isParcel && itemParcelTotal > 0 ? ` • +₹${itemParcelTotal} parcel` : ''}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 shrink-0">
+                  <span className="text-muted font-bold text-xs">x{item.quantity}</span>
+                  <span className="font-mono font-bold text-primary-dark">₹{itemLineTotal}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-6">
-                <span className="text-muted font-bold text-xs">x{item.quantity}</span>
-                <span className="font-mono font-bold text-primary-dark">₹{item.price * item.quantity}</span>
+            );
+          })}
+
+          {Number(order.parcelChargeTotal || 0) > 0 && (
+            <div className="space-y-1.5 pt-3 border-t border-border border-dashed text-xs font-semibold text-muted">
+              <div className="flex justify-between">
+                <span>Food Subtotal</span>
+                <span className="font-mono text-primary-dark">₹{Number(order.foodSubtotal ?? order.subtotal ?? 0)}</span>
+              </div>
+              <div className="flex justify-between text-amber-dark font-bold">
+                <span>Parcel Charges</span>
+                <span className="font-mono">+₹{Number(order.parcelChargeTotal)}</span>
               </div>
             </div>
-          ))}
+          )}
 
           {order.discount > 0 && (
             <div className="flex justify-between text-xs text-primary font-bold pt-3.5 border-t border-border border-dashed">

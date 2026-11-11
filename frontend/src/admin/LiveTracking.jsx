@@ -710,35 +710,44 @@ const LiveTracking = () => {
 
                   {/* Line Items List with Thumbnails */}
                   <div className="flex flex-col gap-1.5 mb-4">
-                    {order.items?.map((it, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between text-xs py-1 px-2.5 bg-cream/70 rounded-xl border border-border/50"
-                      >
-                        <div className="flex items-center gap-2">
-                          {it.image ? (
-                            <img
-                              src={it.image}
-                              alt={it.name}
-                              className="w-6 h-6 rounded-lg object-cover border border-border"
-                            />
-                          ) : (
-                            <span className="text-sm">{it.emoji || '🍛'}</span>
-                          )}
-                          <span className="font-bold text-primary-dark line-clamp-1 max-w-[150px]">
-                            {it.name}
-                          </span>
+                    {order.items?.map((it, idx) => {
+                      const isParcel = it.serviceType === 'PARCEL' || Number(it.parcelChargeTotal || 0) > 0;
+                      const lineTotal = Number(it.price) * Number(it.quantity) + Number(it.parcelChargeTotal || 0);
+                      return (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between text-xs py-1 px-2.5 bg-cream/70 rounded-xl border border-border/50 gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            {it.image ? (
+                              <img
+                                src={it.image}
+                                alt={it.name}
+                                className="w-6 h-6 rounded-lg object-cover border border-border shrink-0"
+                              />
+                            ) : (
+                              <span className="text-sm shrink-0">{it.emoji || '🍛'}</span>
+                            )}
+                            <span className="font-bold text-primary-dark truncate max-w-[130px]">
+                              {it.name}
+                            </span>
+                            {isParcel && (
+                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber/25 text-amber-dark shrink-0">
+                                Parcel
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-mono text-amber-dark font-black text-[11px]">
+                              x{it.quantity}
+                            </span>
+                            <span className="font-outfit font-bold text-primary-dark text-xs">
+                              ₹{lineTotal}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-amber-dark font-black text-[11px]">
-                            x{it.quantity}
-                          </span>
-                          <span className="font-outfit font-bold text-primary-dark text-xs">
-                            ₹{it.price * it.quantity}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {/* Total & Payment Row */}
@@ -922,49 +931,72 @@ const LiveTracking = () => {
                   Ordered Items ({selectedOrder.items?.length || 0})
                 </span>
                 <div className="flex flex-col gap-2">
-                  {selectedOrder.items?.map((it, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between p-2.5 bg-gray-50 rounded-xl text-xs"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        {it.image ? (
-                          <img
-                            src={it.image}
-                            alt={it.name}
-                            className="w-8 h-8 rounded-lg object-cover border border-border"
-                          />
-                        ) : (
-                          <span className="text-xl">{it.emoji || '🍛'}</span>
-                        )}
-                        <div>
-                          <strong className="block text-primary-dark leading-tight">
-                            {it.name}
-                          </strong>
-                          <span className="text-[10px] text-muted">
-                            ₹{it.price} each
+                  {selectedOrder.items?.map((it, idx) => {
+                    const isParcel = it.serviceType === 'PARCEL' || Number(it.parcelChargeTotal || 0) > 0;
+                    const itemParcelTotal = Number(it.parcelChargeTotal || 0);
+                    const lineTotal = Number(it.price) * Number(it.quantity) + itemParcelTotal;
+                    return (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between p-2.5 bg-gray-50 rounded-xl text-xs gap-2"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {it.image ? (
+                            <img
+                              src={it.image}
+                              alt={it.name}
+                              className="w-8 h-8 rounded-lg object-cover border border-border shrink-0"
+                            />
+                          ) : (
+                            <span className="text-xl shrink-0">{it.emoji || '🍛'}</span>
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <strong className="text-primary-dark leading-tight truncate">
+                                {it.name}
+                              </strong>
+                              <span
+                                className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full ${
+                                  isParcel
+                                    ? 'bg-amber/25 text-amber-dark'
+                                    : 'bg-white text-muted border border-gray-200'
+                                }`}
+                              >
+                                {isParcel ? 'Parcel' : 'Normal'}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-muted block">
+                              ₹{it.price} each
+                              {isParcel && itemParcelTotal > 0 ? ` • +₹${itemParcelTotal} parcel` : ''}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="font-bold text-amber-dark mr-2">
+                            x{it.quantity}
+                          </span>
+                          <span className="font-outfit font-black text-primary-dark">
+                            ₹{lineTotal}
                           </span>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <span className="font-bold text-amber-dark mr-2">
-                          x{it.quantity}
-                        </span>
-                        <span className="font-outfit font-black text-primary-dark">
-                          ₹{it.price * it.quantity}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Bill Financials */}
               <div className="bg-gray-50 border border-gray-200 p-4 rounded-2xl flex flex-col gap-2 text-xs">
                 <div className="flex justify-between text-muted">
-                  <span>Subtotal:</span>
-                  <span className="font-mono">₹{selectedOrder.subtotal}</span>
+                  <span>Food Subtotal:</span>
+                  <span className="font-mono">₹{selectedOrder.foodSubtotal ?? selectedOrder.subtotal}</span>
                 </div>
+                {Number(selectedOrder.parcelChargeTotal || 0) > 0 && (
+                  <div className="flex justify-between text-xs text-amber-dark font-bold mt-1">
+                    <span>Parcel Charges:</span>
+                    <span className="font-mono">+₹{Number(selectedOrder.parcelChargeTotal)}</span>
+                  </div>
+                )}
                 {selectedOrder.discount > 0 && (
                   <div className="flex justify-between text-primary font-bold">
                     <span>Coupon Discount ({selectedOrder.coupon || 'PROMO'}):</span>

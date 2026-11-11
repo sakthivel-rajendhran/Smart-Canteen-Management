@@ -93,9 +93,18 @@ const Bill = () => {
   });
 
   const is58mm = paperWidth === '58mm';
-  const subtotalAmount = Number(order.subtotal || order.total || 0);
+  const parcelChargeAmount = Number(
+    order.parcelChargeTotal ??
+      order.items?.reduce((sum, item) => sum + Number(item.parcelChargeTotal || 0), 0) ??
+      0
+  );
   const discountAmount = Number(order.discount || 0);
   const totalAmount = Number(order.total || 0);
+  const subtotalAmount = Number(
+    order.foodSubtotal ??
+      order.subtotal ??
+      Math.max(0, totalAmount + discountAmount - parcelChargeAmount)
+  );
 
   return (
     <div className="min-h-screen bg-stone-100 py-6 px-3 sm:px-6 print:min-h-0 print:bg-white print:p-0 print:m-0">
@@ -332,23 +341,44 @@ const Bill = () => {
             {/* Items List */}
             <div className="divide-y divide-dashed divide-stone-300">
               {order.items?.map((item, index) => {
-                const itemTotal = (Number(item.price || 0) * Number(item.quantity || 1)).toFixed(2);
+                const unitPrice = Number(item.price || 0);
+                const qty = Number(item.quantity || 1);
+                const foodLineTotal = Number((unitPrice * qty).toFixed(2));
+                const parcelPerUnit = Number(item.parcelChargePerUnit || 0);
+                const itemParcelTotal = Number(
+                  item.parcelChargeTotal ?? (item.serviceType === 'PARCEL' ? parcelPerUnit * qty : 0)
+                );
+                const isParcel = item.serviceType === 'PARCEL' || itemParcelTotal > 0;
+
                 return (
-                  <div key={index} className="thermal-avoid-break py-1.5 flex items-start text-[11px]">
-                    <div className="flex-1 pr-1">
-                      <div className="font-bold leading-tight break-words">
-                        {item.name}
+                  <div key={index} className="thermal-avoid-break py-1.5 text-[11px]">
+                    <div className="flex items-start">
+                      <div className="flex-1 pr-1">
+                        <div className="font-bold leading-tight break-words">
+                          {item.name}
+                          {isParcel && (
+                            <span className="text-[9px] font-black uppercase ml-1">[PARCEL]</span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-stone-600">
+                          @ ₹{unitPrice.toFixed(2)} {!isParcel ? '• Normal' : ''}
+                        </div>
                       </div>
-                      <div className="text-[10px] text-stone-600">
-                        @ ₹{Number(item.price || 0).toFixed(2)}
+                      <div className="w-10 text-center font-bold pt-0.5">
+                        {qty}
+                      </div>
+                      <div className="w-16 text-right font-black pt-0.5">
+                        ₹{foodLineTotal.toFixed(2)}
                       </div>
                     </div>
-                    <div className="w-10 text-center font-bold pt-0.5">
-                      {item.quantity}
-                    </div>
-                    <div className="w-16 text-right font-black pt-0.5">
-                      ₹{itemTotal}
-                    </div>
+                    {isParcel && itemParcelTotal > 0 && (
+                      <div className="flex justify-between items-center mt-0.5 text-[10px] text-stone-700">
+                        <span>
+                          Parcel ({qty} × ₹{(parcelPerUnit || itemParcelTotal / qty).toFixed(2)})
+                        </span>
+                        <span className="font-bold">+₹{itemParcelTotal.toFixed(2)}</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -361,9 +391,16 @@ const Bill = () => {
           {/* ================= PAYMENT SUMMARY ================= */}
           <div className="thermal-avoid-break space-y-1 text-[11px]">
             <div className="flex justify-between">
-              <span className="font-semibold">Subtotal</span>
+              <span className="font-semibold">Food Subtotal</span>
               <span className="font-bold">₹{subtotalAmount.toFixed(2)}</span>
             </div>
+
+            {parcelChargeAmount > 0 && (
+              <div className="flex justify-between">
+                <span className="font-semibold">Parcel Charges</span>
+                <span className="font-bold">+₹{parcelChargeAmount.toFixed(2)}</span>
+              </div>
+            )}
 
             {discountAmount > 0 && (
               <div className="flex justify-between">

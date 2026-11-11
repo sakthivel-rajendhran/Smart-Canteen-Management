@@ -1,9 +1,31 @@
 import React, { useState } from 'react';
 import { Plus, Minus, Sparkles, Clock, AlertCircle } from 'lucide-react';
+import { getItemCategories, isItemParcelEligible } from '../../utils/categoryHelpers';
 
-const FoodCard = ({ item, quantity = 0, onAdd, onChangeQty, onOpenDetail }) => {
+const FoodCard = ({
+  item,
+  quantity = 0,
+  normalQty = 0,
+  parcelQty = 0,
+  parcelEnabled = true,
+  parcelChargePerItem = 5,
+  onAdd,
+  onChangeQty,
+  onOpenDetail,
+}) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [serviceType, setServiceType] = useState('NORMAL');
+
+  const itemParcelEligible = isItemParcelEligible(item);
+  const canSelectParcel = parcelEnabled && itemParcelEligible;
+  const effectiveServiceType = canSelectParcel ? serviceType : 'NORMAL';
+  const activeQty =
+    effectiveServiceType === 'PARCEL'
+      ? parcelQty
+      : canSelectParcel
+        ? normalQty
+        : normalQty || quantity;
 
   const rawImageUrl = item?.image?.url || (typeof item?.image === 'string' ? item.image : '') || '';
 
@@ -21,7 +43,7 @@ const FoodCard = ({ item, quantity = 0, onAdd, onChangeQty, onOpenDetail }) => {
 
   return (
     <div
-      className={`group relative bg-white border border-border rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 flex flex-col ${
+      className={`group relative bg-white border border-border rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 flex flex-col w-full min-w-0 ${
         !isAvailable ? 'opacity-75' : ''
       }`}
     >
@@ -92,87 +114,139 @@ const FoodCard = ({ item, quantity = 0, onAdd, onChangeQty, onOpenDetail }) => {
         {/* Category Pill Over Image Bottom */}
         <div className="absolute bottom-2.5 left-2.5 pointer-events-none">
           <span className="bg-white/95 text-primary-dark font-bold text-[10px] px-2.5 py-0.5 rounded-full shadow-sm backdrop-blur-md">
-            {item.category?.name || 'Canteen Special'}
+            {getItemCategories(item)
+              .map((c) => c.name)
+              .filter(Boolean)
+              .join(' · ') || item.category?.name || 'Canteen Special'}
           </span>
         </div>
       </div>
 
       {/* Card Body Details */}
-      <div className="p-4 md:p-5 flex flex-col flex-1">
+      <div className="p-4 md:p-5 flex flex-col flex-1 min-w-0">
         {/* Title */}
         <h3 
           onClick={() => onOpenDetail && onOpenDetail(item)}
-          className="font-outfit font-black text-sm md:text-base text-primary-dark hover:text-primary mb-1 leading-snug cursor-pointer transition-colors line-clamp-1"
+          className="font-outfit font-black text-sm md:text-base text-primary-dark hover:text-primary mb-1 leading-snug break-words cursor-pointer transition-colors"
           title={item.name}
         >
           {item.name}
         </h3>
 
         {/* Description */}
-        <p className="text-muted text-[11px] md:text-xs leading-relaxed mb-4 flex-1 line-clamp-2">
+        <p className="text-muted text-[11px] md:text-xs leading-relaxed break-words mb-3 flex-1">
           {item.description || 'Authentic traditional recipe prepared fresh everyday at DRS College Canteen.'}
         </p>
 
+        {/* Per-Item Normal / Parcel Option Selector (Shown ONLY for parcel-eligible items when enabled) */}
+        {canSelectParcel && isAvailable && (
+          <div onClick={(e) => e.stopPropagation()} className="mb-2.5">
+            <div className="grid grid-cols-2 gap-1 bg-cream p-1 rounded-xl border border-border">
+              <button
+                type="button"
+                onClick={() => setServiceType('NORMAL')}
+                data-testid={`food-service-normal-${item._id}`}
+                className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all text-center whitespace-nowrap ${
+                  effectiveServiceType === 'NORMAL'
+                    ? 'bg-primary-dark text-white shadow-xs'
+                    : 'text-primary-dark/75 hover:text-primary-dark'
+                }`}
+              >
+                Normal
+              </button>
+              <button
+                type="button"
+                onClick={() => setServiceType('PARCEL')}
+                data-testid={`food-service-parcel-${item._id}`}
+                className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all text-center whitespace-nowrap ${
+                  effectiveServiceType === 'PARCEL'
+                    ? 'bg-amber text-primary-darker shadow-xs font-black'
+                    : 'text-primary-dark/75 hover:text-primary-dark'
+                }`}
+              >
+                Parcel +₹{parcelChargePerItem}
+              </button>
+            </div>
+            {(normalQty > 0 || parcelQty > 0) && (normalQty > 0 && parcelQty > 0 || (effectiveServiceType === 'NORMAL' && parcelQty > 0) || (effectiveServiceType === 'PARCEL' && normalQty > 0)) && (
+              <div className="text-[10px] font-semibold text-primary-dark/80 mt-1 px-1 truncate">
+                In tray: {normalQty > 0 ? `${normalQty} Normal` : ''}
+                {normalQty > 0 && parcelQty > 0 ? ' · ' : ''}
+                {parcelQty > 0 ? `${parcelQty} Parcel` : ''}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Price & Prep Time Row */}
-        <div className="flex items-center justify-between pt-2 border-t border-border/60 mt-auto">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-border/60 mt-auto min-w-0">
+          <div className="min-w-0 shrink-0">
             <div className="flex items-center gap-1 text-[10px] text-muted font-bold mb-0.5">
-              <Clock className="w-3 h-3 text-primary" />
+              <Clock className="w-3 h-3 text-primary shrink-0" />
               <span>{item.preparationTime || 10} mins</span>
             </div>
-            <span className="font-outfit font-black text-lg md:text-xl text-primary-dark tracking-tight">
-              ₹{item.price}
-            </span>
+            <div className="flex items-baseline gap-1.5 flex-wrap">
+              <span className="font-outfit font-black text-lg md:text-xl text-primary-dark tracking-tight">
+                ₹{item.price}
+              </span>
+              {canSelectParcel && effectiveServiceType === 'PARCEL' && isAvailable && (
+                <span className="text-[10px] font-bold text-amber-dark whitespace-nowrap">
+                  +₹{parcelChargePerItem} parcel
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Action Button: Add or Quantity Incrementer */}
-          {!isAvailable ? (
-            <button
-              disabled
-              className="bg-gray-100 text-gray-400 cursor-not-allowed font-bold text-[11px] px-3.5 py-2 rounded-xl border border-gray-200"
-            >
-              Sold Out
-            </button>
-          ) : quantity > 0 ? (
-            <div className="flex items-center bg-primary-light rounded-xl p-1 border border-primary/20 shadow-sm">
+          <div className="shrink-0 ml-auto">
+            {!isAvailable ? (
+              <button
+                disabled
+                className="bg-gray-100 text-gray-400 cursor-not-allowed font-bold text-[11px] px-3.5 py-2 min-h-[36px] rounded-xl border border-gray-200 whitespace-nowrap"
+              >
+                Sold Out
+              </button>
+            ) : activeQty > 0 ? (
+              <div className="inline-flex items-center bg-primary-light rounded-xl p-1 border border-primary/20 shadow-sm">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChangeQty(item._id, -1, effectiveServiceType);
+                  }}
+                  className="w-7 h-7 bg-white hover:bg-primary hover:text-white text-primary-dark rounded-lg font-bold flex items-center justify-center transition-all shadow-sm active:scale-95"
+                  title="Decrease quantity"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+                <span className="font-outfit font-black text-xs px-2.5 text-primary-dark select-none">
+                  {activeQty}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChangeQty(item._id, 1, effectiveServiceType);
+                  }}
+                  className="w-7 h-7 bg-white hover:bg-primary hover:text-white text-primary-dark rounded-lg font-bold flex items-center justify-center transition-all shadow-sm active:scale-95"
+                  title="Increase quantity"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onChangeQty(item._id, -1);
+                  onAdd(item, effectiveServiceType);
                 }}
-                className="w-7 h-7 bg-white hover:bg-primary hover:text-white text-primary-dark rounded-lg font-bold flex items-center justify-center transition-all shadow-sm active:scale-95"
-                title="Decrease quantity"
+                data-testid={`food-add-${item._id}`}
+                className="group-hover:bg-primary bg-primary-dark text-white font-bold text-xs px-4 py-2 min-h-[36px] rounded-xl transition-all duration-200 shadow-md hover:shadow-lg inline-flex items-center justify-center gap-1 active:scale-95 whitespace-nowrap"
               >
-                <Minus className="w-3.5 h-3.5" />
+                <Plus className="w-3.5 h-3.5" /> Add
               </button>
-              <span className="font-outfit font-black text-xs px-2.5 text-primary-dark select-none">
-                {quantity}
-              </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onChangeQty(item._id, 1);
-                }}
-                className="w-7 h-7 bg-white hover:bg-primary hover:text-white text-primary-dark rounded-lg font-bold flex items-center justify-center transition-all shadow-sm active:scale-95"
-                title="Increase quantity"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAdd(item);
-              }}
-              className="group-hover:bg-primary bg-primary-dark text-white font-bold text-xs px-4 py-2 rounded-xl transition-all duration-200 shadow-md hover:shadow-lg flex items-center gap-1 active:scale-95"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add
-            </button>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

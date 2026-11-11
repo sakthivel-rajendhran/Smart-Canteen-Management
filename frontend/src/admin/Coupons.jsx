@@ -1,9 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import API from '../services/api';
-import { Percent, Plus, Trash2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useSocket } from '../context/SocketContext';
+import { Percent, Plus, Trash2, CheckCircle2, AlertCircle, Power } from 'lucide-react';
 
 const Coupons = () => {
+  const { socket } = useSocket();
   const [coupons, setCoupons] = useState([]);
+  const [couponsEnabled, setCouponsEnabled] = useState(true);
+  const [globalLoading, setGlobalLoading] = useState(true);
+  const [globalSaving, setGlobalSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -16,21 +21,91 @@ const Coupons = () => {
   const [expiryDate, setExpiryDate] = useState('');
 
   useEffect(() => {
-    fetchCoupons();
+    fetchCouponsAndSettings();
   }, []);
 
-  const fetchCoupons = async () => {
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleSettingsUpdated = (data) => {
+      if (typeof data?.couponsEnabled === 'boolean') {
+        setCouponsEnabled(data.couponsEnabled);
+      }
+    };
+
+    socket.on('coupon:settingsUpdated', handleSettingsUpdated);
+    return () => {
+      socket.off('coupon:settingsUpdated', handleSettingsUpdated);
+    };
+  }, [socket]);
+
+  const fetchCouponsAndSettings = async () => {
     try {
       setLoading(true);
+      setGlobalLoading(true);
       setError('');
-      const response = await API.get('/coupons');
-      if (response.data?.success) {
-        setCoupons(response.data.data);
+      const [couponsRes, settingsRes] = await Promise.all([
+        API.get('/coupons'),
+        API.get('/coupons/settings'),
+      ]);
+
+      if (couponsRes.data?.success) {
+        setCoupons(couponsRes.data.data);
+      }
+      if (settingsRes.data?.success) {
+        setCouponsEnabled(settingsRes.data.data?.couponsEnabled !== false);
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch coupons.');
     } finally {
       setLoading(false);
+      setGlobalLoading(false);
+    }
+  };
+
+  const handleToggleGlobalCoupons = async () => {
+    const nextState = !couponsEnabled;
+    setGlobalSaving(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await API.put('/coupons/settings', {
+        couponsEnabled: nextState,
+      });
+      if (response.data?.success) {
+        setCouponsEnabled(response.data.data?.couponsEnabled !== false);
+        setSuccess(
+          nextState
+            ? 'Global coupons ENABLED — Customer coupon input is now visible and active.'
+            : 'Global coupons DISABLED — Coupon section is now hidden for customers and rejected at checkout.'
+        );
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update global coupon setting.');
+    } finally {
+      setGlobalSaving(false);
+    }
+  };
+
+  const handleToggleIndividualCoupon = async (coupon) => {
+    setError('');
+    setSuccess('');
+    try {
+      const response = await API.put(`/coupons/${coupon._id}`, {
+        active: coupon.active === false,
+      });
+      if (response.data?.success) {
+        const updated = response.data.data;
+        setCoupons((prev) =>
+          prev.map((c) => (c._id === updated._id ? updated : c))
+        );
+        setSuccess(
+          `Coupon "${updated.code}" is now ${updated.active !== false ? 'Active' : 'Inactive'}.`
+        );
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update coupon status.');
     }
   };
 
@@ -46,7 +121,7 @@ const Coupons = () => {
         discountType,
         discountValue,
         minimumOrder,
-        expiryDate
+        expiryDate,
       });
 
       if (response.data?.success) {
@@ -55,7 +130,7 @@ const Coupons = () => {
         setDiscountValue('');
         setMinimumOrder('0');
         setExpiryDate('');
-        fetchCoupons();
+        fetchCouponsAndSettings();
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to create coupon.');
@@ -76,9 +151,65 @@ const Coupons = () => {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 pb-20">
-      <h1 className="font-outfit font-black text-3xl text-primary-dark mb-8 flex items-center gap-2">
+      <h1 className="font-outfit font-black text-3xl text-primary-dark mb-6 flex items-center gap-2">
         <Percent className="w-8 h-8 text-primary" /> Coupon Code Management
       </h1>
+
+      {/* Global Coupon Enable / Disable Setting Card */}
+      <div
+        className={`border rounded-3xl p-5 sm:p-6 mb-6 shadow-sm transition-all flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 ${
+          couponsEnabled
+            ? 'bg-white border-border'
+            : 'bg-amber-light/25 border-amber/40'
+        }`}
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h2 className="font-outfit font-bold text-base text-primary-dark">
+              Global Customer Coupon Visibility
+            </h2>
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold border ${
+                couponsEnabled
+                  ? 'bg-green-50 text-green-700 border-green-200'
+                  : 'bg-gray-100 text-gray-700 border-gray-300'
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  couponsEnabled ? 'bg-green-500' : 'bg-gray-500'
+                }`}
+              />
+              {globalLoading ? 'Checking...' : couponsEnabled ? 'ON — Enabled' : 'OFF — Disabled'}
+            </span>
+          </div>
+          <p className="text-xs text-muted mt-1 leading-relaxed">
+            Single source of truth controlling customer cart & checkout coupon visibility and backend discount validation. Individual promo codes remain saved below.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={couponsEnabled}
+          disabled={globalLoading || globalSaving}
+          onClick={handleToggleGlobalCoupons}
+          className={`inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-bold transition-all shadow-sm shrink-0 cursor-pointer disabled:opacity-60 ${
+            couponsEnabled
+              ? 'bg-primary-dark hover:bg-primary text-white'
+              : 'bg-amber hover:bg-amber-dark text-primary-darker font-black'
+          }`}
+        >
+          <Power className="w-4 h-4" />
+          <span>
+            {globalSaving
+              ? 'Saving...'
+              : couponsEnabled
+              ? 'Disable All Coupons'
+              : 'Enable Coupons'}
+          </span>
+        </button>
+      </div>
 
       {success && (
         <div className="flex items-center gap-2 bg-primary-light border border-primary/20 text-primary-dark text-xs p-4 rounded-2xl mb-6 font-semibold">
@@ -172,7 +303,7 @@ const Coupons = () => {
         {/* Coupons List Table */}
         <div className="lg:col-span-2 bg-white border border-border p-6 rounded-3xl shadow-sm">
           <h2 className="font-outfit font-bold text-base text-primary-dark mb-5 border-b border-border pb-3">
-            Active Promo Codes
+            Promo Codes List
           </h2>
 
           <div className="overflow-x-auto">
@@ -183,44 +314,61 @@ const Coupons = () => {
                   <th className="py-3 px-4">Discount</th>
                   <th className="py-3 px-4 text-center">Min Order</th>
                   <th className="py-3 px-4 text-center">Expiry</th>
+                  <th className="py-3 px-4 text-center">Status</th>
                   <th className="py-3 px-4 text-center rounded-r-2xl">Delete</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-semibold text-primary-dark">
                 {loading ? (
                   <tr>
-                    <td colSpan="5" className="py-8 text-center text-muted">Loading coupons...</td>
+                    <td colSpan="6" className="py-8 text-center text-muted">Loading coupons...</td>
                   </tr>
                 ) : coupons.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="py-8 text-center text-muted">No coupons created yet.</td>
+                    <td colSpan="6" className="py-8 text-center text-muted">No coupons created yet.</td>
                   </tr>
                 ) : (
-                  coupons.map((coupon) => (
-                    <tr key={coupon._id} className="hover:bg-cream/40 transition-all">
-                      <td className="py-4 px-4 font-mono font-bold tracking-wider text-amber-dark uppercase">{coupon.code}</td>
-                      <td className="py-4 px-4">
-                        {coupon.discountType === 'flat' ? `₹${coupon.discountValue} Flat` : `${coupon.discountValue}% Off`}
-                      </td>
-                      <td className="py-4 px-4 text-center">₹{coupon.minimumOrder}</td>
-                      <td className="py-4 px-4 text-center">{new Date(coupon.expiryDate).toLocaleDateString()}</td>
-                      <td className="py-4 px-4 text-center">
-                        <button 
-                          onClick={() => deleteCoupon(coupon._id)}
-                          className="w-8 h-8 bg-red-50 hover:bg-red-500 hover:text-white border border-red-100 text-red-600 rounded-full flex items-center justify-center transition-all mx-auto"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  coupons.map((coupon) => {
+                    const isActive = coupon.active !== false;
+                    return (
+                      <tr key={coupon._id} className="hover:bg-cream/40 transition-all">
+                        <td className="py-4 px-4 font-mono font-bold tracking-wider text-amber-dark uppercase">{coupon.code}</td>
+                        <td className="py-4 px-4">
+                          {coupon.discountType === 'flat' ? `₹${coupon.discountValue} Flat` : `${coupon.discountValue}% Off`}
+                        </td>
+                        <td className="py-4 px-4 text-center">₹{coupon.minimumOrder}</td>
+                        <td className="py-4 px-4 text-center">{new Date(coupon.expiryDate).toLocaleDateString()}</td>
+                        <td className="py-4 px-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleIndividualCoupon(coupon)}
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all cursor-pointer ${
+                              isActive
+                                ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+                                : 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200'
+                            }`}
+                          >
+                            {isActive ? 'Active' : 'Inactive'}
+                          </button>
+                        </td>
+                        <td className="py-4 px-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => deleteCoupon(coupon._id)}
+                            className="w-8 h-8 bg-red-50 hover:bg-red-500 hover:text-white border border-red-100 text-red-600 rounded-full flex items-center justify-center transition-all mx-auto"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
-
     </div>
   );
 };

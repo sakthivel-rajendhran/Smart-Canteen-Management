@@ -720,17 +720,25 @@ const FoodHandover = () => {
                         <span>Qty</span>
                       </div>
                       <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                        {order.items?.map((item, idx) => (
-                          <div key={idx} className="flex justify-between items-center text-stone-800">
-                            <div className="truncate mr-2 font-semibold">
-                              <span>{item.name}</span>
-                              <span className="text-[10px] text-stone-400 ml-1.5">@ ₹{item.price}</span>
+                        {order.items?.map((item, idx) => {
+                          const isParcel = item.serviceType === 'PARCEL' || Number(item.parcelChargeTotal || 0) > 0;
+                          return (
+                            <div key={idx} className="flex justify-between items-center text-stone-800 gap-2">
+                              <div className="truncate font-semibold flex items-center gap-1.5 min-w-0">
+                                <span className="truncate">{item.name}</span>
+                                {isParcel && (
+                                  <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber/25 text-amber-dark shrink-0">
+                                    Parcel{Number(item.parcelChargeTotal || 0) > 0 ? ` +₹${Number(item.parcelChargeTotal)}` : ''}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-stone-400 shrink-0">@ ₹{item.price}</span>
+                              </div>
+                              <span className="font-black font-mono text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200 text-xs shrink-0">
+                                ×{item.quantity}
+                              </span>
                             </div>
-                            <span className="font-black font-mono text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200 text-xs shrink-0">
-                              ×{item.quantity}
-                            </span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -755,9 +763,14 @@ const FoodHandover = () => {
                         <span className="text-[10px] uppercase font-bold text-stone-500 block">
                           Grand Total
                         </span>
-                        <span className="font-outfit font-black text-lg text-stone-900">
+                        <span className="font-outfit font-black text-lg text-stone-900 block leading-tight">
                           ₹{Number(order.total || 0).toFixed(2)}
                         </span>
+                        {Number(order.parcelChargeTotal || 0) > 0 && (
+                          <span className="text-[10px] font-bold text-amber-dark">
+                            incl. ₹{Number(order.parcelChargeTotal).toFixed(2)} parcel
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -869,12 +882,22 @@ const FoodHandover = () => {
               <span className="text-[10px] font-bold uppercase text-stone-400 block mb-1">
                 Handover Items ({confirmModal.order.items?.length || 0})
               </span>
-              {confirmModal.order.items?.map((item, idx) => (
-                <div key={idx} className="flex justify-between items-center text-stone-800">
-                  <span className="truncate">{item.name}</span>
-                  <span className="font-black font-mono">×{item.quantity}</span>
-                </div>
-              ))}
+              {confirmModal.order.items?.map((item, idx) => {
+                const isParcel = item.serviceType === 'PARCEL' || Number(item.parcelChargeTotal || 0) > 0;
+                return (
+                  <div key={idx} className="flex justify-between items-center text-stone-800 gap-2">
+                    <span className="truncate flex items-center gap-1.5">
+                      <span className="truncate">{item.name}</span>
+                      {isParcel && (
+                        <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber/25 text-amber-dark shrink-0">
+                          Parcel{Number(item.parcelChargeTotal || 0) > 0 ? ` +₹${Number(item.parcelChargeTotal)}` : ''}
+                        </span>
+                      )}
+                    </span>
+                    <span className="font-black font-mono shrink-0">×{item.quantity}</span>
+                  </div>
+                );
+              })}
             </div>
 
             <p className="text-[11px] text-stone-500 text-center">

@@ -1,6 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../services/api';
+import {
+  getItemCategories,
+  itemHasActiveCategory,
+  itemMatchesCategory,
+  itemMatchesCategorySearch,
+  isItemParcelEligible,
+  syncItemCategoryUpdate,
+} from '../utils/categoryHelpers';
 import { useSocket } from '../context/SocketContext';
 import ThermalReceiptModal from '../components/common/ThermalReceiptModal';
 import {
@@ -38,6 +46,11 @@ const POSBilling = () => {
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'upi'
   const [cashGiven, setCashGiven] = useState('');
+  const [parcelSettings, setParcelSettings] = useState({
+    parcelEnabled: true,
+    parcelChargePerItem: 5,
+  });
+  const [defaultServiceType, setDefaultServiceType] = useState('NORMAL');
 
   // Submission & Receipt Modal State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -81,20 +94,7 @@ const POSBilling = () => {
         setSelectedCategory((prev) => (prev === updatedCat._id ? 'ALL' : prev));
       }
 
-      setMenuItems((prev) =>
-        prev.map((item) =>
-          item.category?._id === updatedCat._id
-            ? {
-                ...item,
-                category: {
-                  ...item.category,
-                  name: updatedCat.name,
-                  active: updatedCat.active,
-                },
-              }
-            : item
-        )
-      );
+      setMenuItems((prev) => prev.map((item) => syncItemCategoryUpdate(item, updatedCat)));
     };
 
     const handleCategoryDeleted = ({ id }) => {
@@ -102,14 +102,45 @@ const POSBilling = () => {
       setSelectedCategory((prev) => (prev === id ? 'ALL' : prev));
     };
 
+    const handleParcelUpdated = (payload) => {
+      if (!payload) return;
+      const enabled = payload.parcelEnabled !== false;
+      const charge = Number(payload.parcelChargePerItem);
+      setParcelSettings({
+        parcelEnabled: enabled,
+        parcelChargePerItem: Number.isFinite(charge) && charge >= 0 ? charge : 5,
+      });
+      if (!enabled) {
+        setDefaultServiceType('NORMAL');
+        setCart((prev) => {
+          const merged = new Map();
+          for (const entry of prev) {
+            const existing = merged.get(entry.menuItem);
+            if (existing) {
+              merged.set(entry.menuItem, {
+                ...existing,
+                serviceType: 'NORMAL',
+                quantity: existing.quantity + entry.quantity,
+              });
+            } else {
+              merged.set(entry.menuItem, { ...entry, serviceType: 'NORMAL' });
+            }
+          }
+          return Array.from(merged.values());
+        });
+      }
+    };
+
     socket.on('category:created', handleCategoryCreated);
     socket.on('category:updated', handleCategoryUpdated);
     socket.on('category:deleted', handleCategoryDeleted);
+    socket.on('parcel:settingsUpdated', handleParcelUpdated);
 
     return () => {
       socket.off('category:created', handleCategoryCreated);
       socket.off('category:updated', handleCategoryUpdated);
       socket.off('category:deleted', handleCategoryDeleted);
+      socket.off('parcel:settingsUpdated', handleParcelUpdated);
     };
   }, [socket]);
 
@@ -129,9 +160,10 @@ const POSBilling = () => {
     try {
       setLoading(true);
       setError('');
-      const [menuRes, catRes] = await Promise.all([
+      const [menuRes, catRes, parcelRes] = await Promise.all([
         API.get('/menu?activeCategoriesOnly=true'),
         API.get('/categories').catch(() => ({ data: { data: [] } })),
+        API.get('/orders/parcel-settings').catch(() => ({ data: null })),
       ]);
 
       if (menuRes.data?.success) {
@@ -139,6 +171,15 @@ const POSBilling = () => {
       }
       if (catRes.data?.success) {
         setCategories(catRes.data.data || []);
+      }
+      if (parcelRes.data?.success && parcelRes.data.data) {
+        const enabled = parcelRes.data.data.parcelEnabled !== false;
+        const charge = Number(parcelRes.data.data.parcelChargePerItem);
+        setParcelSettings({
+          parcelEnabled: enabled,
+          parcelChargePerItem: Number.isFinite(charge) && charge >= 0 ? charge : 5,
+        });
+        if (!enabled) setDefaultServiceType('NORMAL');
       }
     } catch (err) {
       console.error('POS data fetch error:', err);
@@ -155,21 +196,16 @@ const POSBilling = () => {
     }, 4000);
   };
 
-  // Exclude items in inactive categories
+  // Exclude items whose assigned categories are all deactivated
   const activeMenuItems = useMemo(() => {
-    return menuItems.filter((item) => item.category && item.category.active !== false);
+    return menuItems.filter((item) => itemHasActiveCategory(item));
   }, [menuItems]);
 
-  // Filtered Menu Items
+  // Filtered Menu Items (supports multi-category assignment)
   const filteredItems = useMemo(() => {
     return activeMenuItems.filter((item) => {
-      // Category filter
-      if (selectedCategory !== 'ALL') {
-        const catId = typeof item.category === 'object' ? item.category?._id : item.category;
-        const catName = typeof item.category === 'object' ? item.category?.name : '';
-        if (catId !== selectedCategory && catName !== selectedCategory) {
-          return false;
-        }
+      if (!itemMatchesCategory(item, selectedCategory)) {
+        return false;
       }
 
       // Veg filter
@@ -181,7 +217,7 @@ const POSBilling = () => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const matchesName = item.name?.toLowerCase().includes(q);
-        const matchesCategory = typeof item.category === 'object' && item.category?.name?.toLowerCase().includes(q);
+        const matchesCategory = itemMatchesCategorySearch(item, q);
         return matchesName || matchesCategory;
       }
 
@@ -189,18 +225,30 @@ const POSBilling = () => {
     });
   }, [activeMenuItems, selectedCategory, vegOnly, searchQuery]);
 
-  // Cart operations
-  const addToCart = (item) => {
+  // Cart operations (supports separate NORMAL and PARCEL entries for eligible items; Snacks strictly NORMAL)
+  const addToCart = (item, explicitServiceType = null) => {
     if (!item.available) {
       showToast(`"${item.name}" is currently sold out!`, 'error');
       return;
     }
 
+    const itemEligible = isItemParcelEligible(item);
+    const svc =
+      parcelSettings.parcelEnabled && itemEligible
+        ? (explicitServiceType || defaultServiceType) === 'PARCEL'
+          ? 'PARCEL'
+          : 'NORMAL'
+        : 'NORMAL';
+
     setCart((prev) => {
-      const existing = prev.find((i) => i.menuItem === item._id);
+      const existing = prev.find(
+        (i) => i.menuItem === item._id && (i.serviceType || 'NORMAL') === svc
+      );
       if (existing) {
         return prev.map((i) =>
-          i.menuItem === item._id ? { ...i, quantity: i.quantity + 1 } : i
+          i.menuItem === item._id && (i.serviceType || 'NORMAL') === svc
+            ? { ...i, quantity: i.quantity + 1, parcelEligible: itemEligible }
+            : i
         );
       }
       return [
@@ -210,6 +258,10 @@ const POSBilling = () => {
           name: item.name,
           price: Number(item.price),
           quantity: 1,
+          serviceType: svc,
+          parcelEligible: itemEligible,
+          category: item.category,
+          categories: item.categories,
           isVeg: item.isVeg,
           emoji: item.emoji || '🍛',
           image: item.image?.url || '',
@@ -218,11 +270,12 @@ const POSBilling = () => {
     });
   };
 
-  const updateQuantity = (menuItemId, delta) => {
+  const updateQuantity = (menuItemId, delta, serviceType = 'NORMAL') => {
+    const targetSvc = parcelSettings.parcelEnabled && serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL';
     setCart((prev) =>
       prev
         .map((item) => {
-          if (item.menuItem === menuItemId) {
+          if (item.menuItem === menuItemId && (item.serviceType || 'NORMAL') === targetSvc) {
             const newQty = item.quantity + delta;
             return newQty > 0 ? { ...item, quantity: newQty } : null;
           }
@@ -232,8 +285,37 @@ const POSBilling = () => {
     );
   };
 
-  const removeFromCart = (menuItemId) => {
-    setCart((prev) => prev.filter((i) => i.menuItem !== menuItemId));
+  const changeCartItemServiceType = (menuItemId, fromType, toType) => {
+    if (!parcelSettings.parcelEnabled && toType === 'PARCEL') return;
+    if (fromType === toType) return;
+
+    setCart((prev) => {
+      const updated = prev.map((item) => {
+        const eligible = item.parcelEligible !== false && isItemParcelEligible(item);
+        if (toType === 'PARCEL' && !eligible) return item;
+        return item.menuItem === menuItemId && (item.serviceType || 'NORMAL') === fromType
+          ? { ...item, parcelEligible: eligible, serviceType: toType }
+          : item;
+      });
+      const merged = new Map();
+      for (const entry of updated) {
+        const key = `${entry.menuItem}::${entry.serviceType || 'NORMAL'}`;
+        if (merged.has(key)) {
+          const cur = merged.get(key);
+          merged.set(key, { ...cur, quantity: cur.quantity + entry.quantity });
+        } else {
+          merged.set(key, entry);
+        }
+      }
+      return Array.from(merged.values());
+    });
+  };
+
+  const removeFromCart = (menuItemId, serviceType = 'NORMAL') => {
+    const targetSvc = serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL';
+    setCart((prev) =>
+      prev.filter((i) => !(i.menuItem === menuItemId && (i.serviceType || 'NORMAL') === targetSvc))
+    );
   };
 
   const clearCart = () => {
@@ -245,17 +327,30 @@ const POSBilling = () => {
 
   // Calculations
   const subtotal = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    return Number(cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2));
   }, [cart]);
+
+  const parcelChargeTotal = useMemo(() => {
+    if (!parcelSettings.parcelEnabled) return 0;
+    const perUnit = Number(parcelSettings.parcelChargePerItem) || 0;
+    return Number(
+      cart
+        .reduce((sum, item) => {
+          const eligible = item.parcelEligible !== false && isItemParcelEligible(item);
+          return sum + (eligible && (item.serviceType || 'NORMAL') === 'PARCEL' ? perUnit * item.quantity : 0);
+        }, 0)
+        .toFixed(2)
+    );
+  }, [cart, parcelSettings]);
 
   const discountAmount = useMemo(() => {
     const val = Number(discount) || 0;
-    return Math.max(0, Math.min(subtotal, val));
-  }, [subtotal, discount]);
+    return Math.max(0, Math.min(subtotal + parcelChargeTotal, val));
+  }, [subtotal, parcelChargeTotal, discount]);
 
   const grandTotal = useMemo(() => {
-    return Math.max(0, subtotal - discountAmount);
-  }, [subtotal, discountAmount]);
+    return Math.max(0, Number((subtotal + parcelChargeTotal - discountAmount).toFixed(2)));
+  }, [subtotal, parcelChargeTotal, discountAmount]);
 
   const totalCartCount = useMemo(() => {
     return cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -279,6 +374,7 @@ const POSBilling = () => {
           name: i.name,
           price: i.price,
           quantity: i.quantity,
+          serviceType: parcelSettings.parcelEnabled && i.serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL',
         })),
         paymentMethod,
         paymentStatus: 'paid', // Counter POS sales are strictly collected before completing
@@ -441,6 +537,34 @@ const POSBilling = () => {
                 )}
               </div>
 
+              {/* Service Mode Selector (Normal vs Parcel for Quick Adding) */}
+              {parcelSettings.parcelEnabled && (
+                <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setDefaultServiceType('NORMAL')}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all whitespace-nowrap ${
+                      defaultServiceType === 'NORMAL'
+                        ? 'bg-[#0b3d2e] text-white shadow-2xs'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    Normal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDefaultServiceType('PARCEL')}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all whitespace-nowrap ${
+                      defaultServiceType === 'PARCEL'
+                        ? 'bg-amber text-stone-950 font-black shadow-2xs'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    Parcel +₹{parcelSettings.parcelChargePerItem}
+                  </button>
+                </div>
+              )}
+
               {/* Veg Only toggle */}
               <button
                 type="button"
@@ -522,8 +646,10 @@ const POSBilling = () => {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 xl:grid-cols-4 gap-3 pb-3">
                 {filteredItems.map((item) => {
-                  const cartItem = cart.find((i) => i.menuItem === item._id);
-                  const isAdded = Boolean(cartItem);
+                  const normalQty = cart.find((i) => i.menuItem === item._id && (i.serviceType || 'NORMAL') === 'NORMAL')?.quantity || 0;
+                  const parcelQty = cart.find((i) => i.menuItem === item._id && i.serviceType === 'PARCEL')?.quantity || 0;
+                  const totalQtyForItem = normalQty + parcelQty;
+                  const isAdded = totalQtyForItem > 0;
 
                   return (
                     <div
@@ -538,33 +664,22 @@ const POSBilling = () => {
                       }`}
                     >
                       {/* Top Badges */}
-                      <div className="flex items-center justify-between mb-1.5">
-                        {/* Veg / Non-Veg Indicator */}
-                        <div
-                          className={`w-3.5 h-3.5 border rounded-sm flex items-center justify-center ${
-                            item.isVeg ? 'border-emerald-600' : 'border-rose-600'
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              item.isVeg ? 'bg-emerald-600' : 'bg-rose-600'
-                            }`}
-                          />
+                      {(isAdded || !item.available) && (
+                        <div className="flex items-center justify-end gap-1.5 mb-1.5 flex-wrap">
+                          {/* Cart quantity tag if already in cart */}
+                          {isAdded && (
+                            <span className="bg-[#0b3d2e] text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-2xs">
+                              {totalQtyForItem} in cart{parcelQty > 0 ? ` (${parcelQty}P)` : ''}
+                            </span>
+                          )}
+
+                          {!item.available && (
+                            <span className="bg-red-100 text-red-700 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                              Sold Out
+                            </span>
+                          )}
                         </div>
-
-                        {/* Cart quantity tag if already in cart */}
-                        {isAdded && (
-                          <span className="bg-[#0b3d2e] text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-2xs">
-                            {cartItem.quantity} in cart
-                          </span>
-                        )}
-
-                        {!item.available && (
-                          <span className="bg-red-100 text-red-700 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                            Sold Out
-                          </span>
-                        )}
-                      </div>
+                      )}
 
                       {/* Food Image / Emoji */}
                       <div className="w-full aspect-[4/3] rounded-xl overflow-hidden bg-stone-100 mb-2 flex items-center justify-center">
@@ -663,61 +778,115 @@ const POSBilling = () => {
                   </p>
                 </div>
               ) : (
-                cart.map((item) => (
-                  <div key={item.menuItem} className="pt-2 first:pt-0 flex items-center justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${item.isVeg ? 'bg-emerald-600' : 'bg-rose-600'}`} />
-                        <h4 className="font-bold text-xs text-stone-900 truncate">
-                          {item.name}
-                        </h4>
-                      </div>
-                      <span className="text-[10px] text-stone-500 font-medium ml-3.5">
-                        ₹{item.price.toFixed(2)} each
-                      </span>
-                    </div>
+                cart.map((item) => {
+                  const itemEligible = item.parcelEligible !== false && isItemParcelEligible(item);
+                  const canParcel = parcelSettings.parcelEnabled && itemEligible;
+                  const svcType =
+                    canParcel && item.serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL';
+                  const isParcel = svcType === 'PARCEL';
+                  const perUnitParcel = isParcel ? Number(parcelSettings.parcelChargePerItem) || 0 : 0;
+                  const itemParcelTotal = Number((perUnitParcel * item.quantity).toFixed(2));
+                  const itemLineTotal = Number((item.price * item.quantity + itemParcelTotal).toFixed(2));
 
-                    {/* Quantity controls */}
-                    <div className="flex items-center gap-1.5 bg-stone-100 p-1 rounded-xl shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => updateQuantity(item.menuItem, -1)}
-                        className="w-5 h-5 rounded bg-white text-stone-700 flex items-center justify-center hover:bg-stone-200 transition shadow-2xs"
-                        title="Decrease quantity"
-                      >
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <span className="w-5 text-center font-black text-xs font-mono">
-                        {item.quantity}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => updateQuantity(item.menuItem, 1)}
-                        className="w-5 h-5 rounded bg-white text-stone-700 flex items-center justify-center hover:bg-stone-200 transition shadow-2xs"
-                        title="Increase quantity"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
-                    </div>
-
-                    {/* Item Total */}
-                    <div className="text-right w-16 shrink-0">
-                      <span className="font-outfit font-black text-xs text-stone-900">
-                        ₹{(item.price * item.quantity).toFixed(2)}
-                      </span>
-                    </div>
-
-                    {/* Remove button */}
-                    <button
-                      type="button"
-                      onClick={() => removeFromCart(item.menuItem)}
-                      className="text-stone-400 hover:text-red-500 p-1 transition shrink-0"
-                      title="Remove item from cart"
+                  return (
+                    <div
+                      key={`${item.menuItem}::${svcType}`}
+                      className="pt-2 first:pt-0 flex items-start justify-between gap-2"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${item.isVeg ? 'bg-emerald-600' : 'bg-rose-600'}`} />
+                          <h4 className="font-bold text-xs text-stone-900 truncate">
+                            {item.name}
+                          </h4>
+                          <span
+                            className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded ${
+                              isParcel
+                                ? 'bg-amber/25 text-amber-dark'
+                                : 'bg-stone-100 text-stone-600'
+                            }`}
+                          >
+                            {isParcel ? 'Parcel' : canParcel ? 'Normal' : 'Normal Only'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-stone-500 font-medium ml-3.5">
+                          ₹{item.price.toFixed(2)} each
+                          {isParcel && perUnitParcel > 0 && (
+                            <span className="text-amber-dark font-bold ml-1">
+                              (+₹{itemParcelTotal.toFixed(2)} parcel)
+                            </span>
+                          )}
+                        </div>
+                        {canParcel && (
+                          <div className="inline-flex items-center gap-1 bg-stone-100 rounded-lg p-0.5 ml-3.5 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => changeCartItemServiceType(item.menuItem, svcType, 'NORMAL')}
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition ${
+                                !isParcel
+                                  ? 'bg-[#0b3d2e] text-white shadow-2xs'
+                                  : 'text-stone-600 hover:text-stone-900'
+                              }`}
+                            >
+                              Normal
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => changeCartItemServiceType(item.menuItem, svcType, 'PARCEL')}
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition ${
+                                isParcel
+                                  ? 'bg-amber text-stone-950 font-black shadow-2xs'
+                                  : 'text-stone-600 hover:text-stone-900'
+                              }`}
+                            >
+                              Parcel +₹{parcelSettings.parcelChargePerItem}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Quantity controls */}
+                      <div className="flex items-center gap-1.5 bg-stone-100 p-1 rounded-xl shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.menuItem, -1, svcType)}
+                          className="w-5 h-5 rounded bg-white text-stone-700 flex items-center justify-center hover:bg-stone-200 transition shadow-2xs"
+                          title="Decrease quantity"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="w-5 text-center font-black text-xs font-mono">
+                          {item.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.menuItem, 1, svcType)}
+                          className="w-5 h-5 rounded bg-white text-stone-700 flex items-center justify-center hover:bg-stone-200 transition shadow-2xs"
+                          title="Increase quantity"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      {/* Item Total */}
+                      <div className="text-right w-16 shrink-0 pt-0.5">
+                        <span className="font-outfit font-black text-xs text-stone-900">
+                          ₹{itemLineTotal.toFixed(2)}
+                        </span>
+                      </div>
+
+                      {/* Remove button */}
+                      <button
+                        type="button"
+                        onClick={() => removeFromCart(item.menuItem, svcType)}
+                        className="text-stone-400 hover:text-red-500 p-1 transition shrink-0"
+                        title="Remove item from cart"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
 
@@ -862,7 +1031,7 @@ const POSBilling = () => {
                 <input
                   type="number"
                   min="0"
-                  max={subtotal}
+                  max={subtotal + parcelChargeTotal}
                   value={discount || ''}
                   placeholder="0"
                   onChange={(e) => setDiscount(Math.max(0, Number(e.target.value)))}
@@ -873,9 +1042,15 @@ const POSBilling = () => {
               {/* Bill Totals Summary */}
               <div className="bg-stone-50 p-2.5 rounded-2xl border border-stone-200 space-y-1">
                 <div className="flex justify-between text-xs text-stone-600 font-medium">
-                  <span>Subtotal</span>
+                  <span>Food Subtotal</span>
                   <span className="font-mono font-bold">₹{subtotal.toFixed(2)}</span>
                 </div>
+                {(parcelChargeTotal > 0 || parcelSettings.parcelEnabled) && (
+                  <div className="flex justify-between text-xs text-amber-dark font-bold">
+                    <span>Parcel Charges</span>
+                    <span className="font-mono">+₹{parcelChargeTotal.toFixed(2)}</span>
+                  </div>
+                )}
                 {discountAmount > 0 && (
                   <div className="flex justify-between text-xs text-emerald-600 font-bold">
                     <span>Discount</span>

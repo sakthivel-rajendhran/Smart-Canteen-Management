@@ -2,13 +2,14 @@ import mongoose from 'mongoose';
 import MenuItem from '../models/MenuItem.js';
 import Category from '../models/Category.js';
 import { cache } from '../utils/cache.js';
+import { isItemParcelEligible } from '../utils/parcelHelper.js';
 import {
   isCloudinaryConfigured,
   uploadToCloudinary,
   deleteCloudinaryAsset,
 } from '../config/cloudinary.js';
 
-// Helper to normalize image structure for backward compatibility
+// Helper to normalize image structure and multi-category array for backward compatibility
 // When isList is true, huge legacy base64 data URIs are stripped to keep list payloads minimal
 const normalizeMenuItemImage = (item, isList = false) => {
   const plain = item.toObject ? item.toObject() : { ...item };
@@ -21,7 +22,50 @@ const normalizeMenuItemImage = (item, isList = false) => {
   if (isList && plain.image?.url?.startsWith('data:')) {
     plain.image = { ...plain.image, url: '' };
   }
+  const combined = [];
+  if (plain.category) combined.push(plain.category);
+  if (Array.isArray(plain.categories)) {
+    for (const c of plain.categories) {
+      if (c && !combined.some((x) => String(x._id || x) === String(c._id || c))) {
+        combined.push(c);
+      }
+    }
+  }
+  plain.categories = combined;
   return plain;
+};
+
+const parseCategoriesInput = (rawCategories, primaryCategory) => {
+  let list = [];
+  if (Array.isArray(rawCategories)) {
+    list = rawCategories;
+  } else if (typeof rawCategories === 'string' && rawCategories.trim()) {
+    try {
+      const parsed = JSON.parse(rawCategories);
+      list = Array.isArray(parsed) ? parsed : rawCategories.split(',');
+    } catch {
+      list = rawCategories.split(',');
+    }
+  }
+  const validExtras = list
+    .map((c) => String(c?._id || c || '').trim())
+    .filter((id) => mongoose.Types.ObjectId.isValid(id));
+  const result = [];
+  if (primaryCategory && mongoose.Types.ObjectId.isValid(String(primaryCategory))) {
+    result.push(String(primaryCategory));
+  }
+  for (const id of validExtras) {
+    if (!result.includes(id)) result.push(id);
+  }
+  return result;
+};
+
+const itemHasAnyActiveCategory = (item) => {
+  const allCats = [
+    item.category,
+    ...(Array.isArray(item.categories) ? item.categories : []),
+  ].filter(Boolean);
+  return allCats.some((c) => c.active !== false);
 };
 
 // @desc    Get all menu items
@@ -40,28 +84,41 @@ const getMenuItems = async (req, res) => {
       return res.json(cachedData);
     }
 
-    let query = {};
+    const andConditions = [];
+    let targetCategoryDoc = null;
 
     if (category && category !== 'all') {
       if (mongoose.Types.ObjectId.isValid(category)) {
-        query.category = category;
+        targetCategoryDoc = await Category.findById(category).lean();
+        if (!targetCategoryDoc) {
+          return res.json({ success: true, count: 0, data: [] });
+        }
+        andConditions.push({ $or: [{ category: targetCategoryDoc._id }, { categories: targetCategoryDoc._id }] });
       } else {
-        const catDoc = await Category.findOne({ name: { $regex: new RegExp(`^${category}$`, 'i') } }).lean();
-        if (catDoc) {
-          query.category = catDoc._id;
+        targetCategoryDoc = await Category.findOne({ name: { $regex: new RegExp(`^${category}$`, 'i') } }).lean();
+        if (targetCategoryDoc) {
+          andConditions.push({ $or: [{ category: targetCategoryDoc._id }, { categories: targetCategoryDoc._id }] });
         } else {
           return res.json({ success: true, count: 0, data: [] });
         }
       }
     }
 
+    if (activeCategoriesOnly === 'true' && targetCategoryDoc && targetCategoryDoc.active === false) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+
     if (search && search.trim()) {
       const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      query.$or = [
-        { name: { $regex: safeSearch, $options: 'i' } },
-        { description: { $regex: safeSearch, $options: 'i' } },
-      ];
+      andConditions.push({
+        $or: [
+          { name: { $regex: safeSearch, $options: 'i' } },
+          { description: { $regex: safeSearch, $options: 'i' } },
+        ],
+      });
     }
+
+    const query = andConditions.length > 0 ? { $and: andConditions } : {};
 
     if (availableOnly === 'true') {
       query.available = true;
@@ -72,21 +129,25 @@ const getMenuItems = async (req, res) => {
     }
 
     if (needsImage === 'true') {
-      query.$or = [
-        { 'image.url': { $in: ['', null] } },
-        { image: { $in: ['', null] } },
-      ];
+      andConditions.push({
+        $or: [
+          { 'image.url': { $in: ['', null] } },
+          { image: { $in: ['', null] } },
+        ],
+      });
+      query.$and = andConditions;
     }
 
     const menuItems = await MenuItem.find(query)
-      .select('name category description price image emoji backgroundColor available featured preparationTime createdAt')
-      .populate('category', 'name active')
+      .select('name category categories description price image emoji backgroundColor available featured preparationTime adminReviewNote createdAt')
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible')
       .sort({ createdAt: -1 })
       .lean();
 
     const filteredByCategoryStatus =
       activeCategoriesOnly === 'true'
-        ? menuItems.filter((item) => item.category && item.category.active !== false)
+        ? menuItems.filter((item) => itemHasAnyActiveCategory(item))
         : menuItems;
 
     const normalized = filteredByCategoryStatus.map((item) => normalizeMenuItemImage(item, true));
@@ -118,8 +179,9 @@ const getMenuItemById = async (req, res) => {
     }
 
     const menuItem = await MenuItem.findById(req.params.id)
-      .select('name category description price image emoji backgroundColor available featured preparationTime createdAt')
-      .populate('category', 'name active')
+      .select('name category categories description price image emoji backgroundColor available featured preparationTime adminReviewNote createdAt')
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible')
       .lean();
 
     if (!menuItem) {
@@ -151,18 +213,20 @@ const checkMenuItems = async (req, res) => {
     }
 
     const items = await MenuItem.find({ _id: { $in: validIds } })
-      .select('_id name available price category')
-      .populate('category', 'name active')
+      .select('_id name available price category categories')
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible')
       .lean();
 
     const checked = items.map((item) => {
-      const categoryInactive = !item.category || item.category.active === false;
+      const categoryInactive = !itemHasAnyActiveCategory(item);
       return {
         _id: item._id,
         name: item.name,
         price: item.price,
         available: categoryInactive ? false : item.available,
         categoryInactive,
+        parcelEligible: isItemParcelEligible(item),
       };
     });
 
@@ -235,6 +299,7 @@ const createMenuItem = async (req, res) => {
     const {
       name,
       category,
+      categories,
       description,
       price,
       emoji,
@@ -242,6 +307,7 @@ const createMenuItem = async (req, res) => {
       available,
       featured,
       preparationTime,
+      adminReviewNote,
       imageUrl,
       imagePublicId,
     } = req.body;
@@ -263,6 +329,21 @@ const createMenuItem = async (req, res) => {
         success: false,
         message: `Category "${catDoc.name}" is currently inactive. Inactive categories cannot be assigned to new food items.`,
       });
+    }
+
+    const normalizedCatIds = parseCategoriesInput(categories, category);
+    if (normalizedCatIds.length > 1) {
+      const allCats = await Category.find({ _id: { $in: normalizedCatIds } }).lean();
+      if (allCats.length !== normalizedCatIds.length) {
+        return res.status(400).json({ success: false, message: 'One or more additional categories were not found.' });
+      }
+      const inactiveExtra = allCats.find((c) => c.active === false);
+      if (inactiveExtra) {
+        return res.status(400).json({
+          success: false,
+          message: `Category "${inactiveExtra.name}" is inactive and cannot be assigned.`,
+        });
+      }
     }
 
     // Determine category name for organized Cloudinary folder hierarchy
@@ -295,6 +376,7 @@ const createMenuItem = async (req, res) => {
       menuItem = await MenuItem.create({
         name: name.trim(),
         category,
+        categories: normalizedCatIds,
         description: description ? description.trim() : '',
         price: Number(price),
         image: imageData,
@@ -303,6 +385,7 @@ const createMenuItem = async (req, res) => {
         available: available !== undefined ? (available === 'true' || available === true) : true,
         featured: featured === 'true' || featured === true,
         preparationTime: preparationTime ? Number(preparationTime) : 10,
+        adminReviewNote: adminReviewNote ? String(adminReviewNote).trim() : '',
       });
     } catch (dbError) {
       // Handle orphan cleanup: if upload succeeded but DB save failed, delete from Cloudinary
@@ -312,7 +395,9 @@ const createMenuItem = async (req, res) => {
       throw dbError;
     }
 
-    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active');
+    const populatedItem = await MenuItem.findById(menuItem._id)
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible');
     const normalizedItem = normalizeMenuItemImage(populatedItem);
 
     // Broadcast real-time event via Socket.IO
@@ -348,6 +433,7 @@ const updateMenuItem = async (req, res) => {
     const {
       name,
       category,
+      categories,
       description,
       price,
       emoji,
@@ -355,6 +441,7 @@ const updateMenuItem = async (req, res) => {
       available,
       featured,
       preparationTime,
+      adminReviewNote,
       imageUrl,
       imagePublicId,
       removeImage,
@@ -425,6 +512,17 @@ const updateMenuItem = async (req, res) => {
       menuItem.category = category;
     }
 
+    if (categories !== undefined) {
+      const normalizedCatIds = parseCategoriesInput(categories, menuItem.category);
+      const foundCats = await Category.find({ _id: { $in: normalizedCatIds } }).lean();
+      if (foundCats.length !== normalizedCatIds.length) {
+        return res.status(400).json({ success: false, message: 'One or more assigned categories were not found.' });
+      }
+      menuItem.categories = normalizedCatIds;
+    } else {
+      menuItem.categories = parseCategoriesInput(menuItem.categories || [], menuItem.category);
+    }
+
     if (name !== undefined) menuItem.name = name.trim();
     if (description !== undefined) menuItem.description = description.trim();
     if (price !== undefined) menuItem.price = Number(price);
@@ -434,6 +532,7 @@ const updateMenuItem = async (req, res) => {
     if (available !== undefined) menuItem.available = available === 'true' || available === true;
     if (featured !== undefined) menuItem.featured = featured === 'true' || featured === true;
     if (preparationTime !== undefined) menuItem.preparationTime = Number(preparationTime);
+    if (adminReviewNote !== undefined) menuItem.adminReviewNote = String(adminReviewNote).trim();
 
     try {
       await menuItem.save();
@@ -452,7 +551,9 @@ const updateMenuItem = async (req, res) => {
       await deleteCloudinaryAsset(oldPublicId);
     }
 
-    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active');
+    const populatedItem = await MenuItem.findById(menuItem._id)
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible');
     const normalizedItem = normalizeMenuItemImage(populatedItem);
 
     // Broadcast real-time event via Socket.IO
@@ -534,7 +635,10 @@ const toggleAvailability = async (req, res) => {
     menuItem.available = !menuItem.available;
     await menuItem.save();
 
-    const populatedItem = await MenuItem.findById(menuItem._id).populate('category', 'name active').lean();
+    const populatedItem = await MenuItem.findById(menuItem._id)
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible')
+      .lean();
     const normalizedItem = normalizeMenuItemImage(populatedItem, false);
 
     // Broadcast real-time event via Socket.IO
@@ -579,7 +683,9 @@ const uploadMenuImage = async (req, res) => {
       });
     }
 
-    const menuItem = await MenuItem.findById(req.params.id).populate('category');
+    const menuItem = await MenuItem.findById(req.params.id)
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible');
     if (!menuItem) {
       return res.status(404).json({ success: false, message: 'Menu item not found' });
     }
@@ -630,7 +736,9 @@ const deleteMenuImage = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Menu item not found' });
     }
 
-    const menuItem = await MenuItem.findById(req.params.id).populate('category');
+    const menuItem = await MenuItem.findById(req.params.id)
+      .populate('category', 'name active parcelEligible')
+      .populate('categories', 'name active parcelEligible');
     if (!menuItem) {
       return res.status(404).json({ success: false, message: 'Menu item not found' });
     }

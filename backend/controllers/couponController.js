@@ -1,5 +1,68 @@
 import mongoose from 'mongoose';
 import Coupon from '../models/Coupon.js';
+import CanteenSettings from '../models/CanteenSettings.js';
+
+const getOrCreateGlobalSettings = async () => {
+  let settings = await CanteenSettings.findOne({ key: 'default' });
+  if (!settings) {
+    settings = await CanteenSettings.create({ key: 'default', couponsEnabled: true });
+  }
+  return settings;
+};
+
+export const isGlobalCouponsEnabled = async () => {
+  const settings = await CanteenSettings.findOne({ key: 'default' }).lean();
+  return settings ? settings.couponsEnabled !== false : true;
+};
+
+// @desc    Get global coupon enable/disable setting
+// @route   GET /api/coupons/settings
+// @access  Public
+const getCouponSettings = async (req, res) => {
+  try {
+    const couponsEnabled = await isGlobalCouponsEnabled();
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json({
+      success: true,
+      data: { couponsEnabled },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Update global coupon enable/disable setting
+// @route   PUT /api/coupons/settings
+// @access  Private/Admin
+const updateCouponSettings = async (req, res) => {
+  try {
+    const { couponsEnabled } = req.body;
+    if (typeof couponsEnabled !== 'boolean' && couponsEnabled !== 'true' && couponsEnabled !== 'false') {
+      return res.status(400).json({
+        success: false,
+        message: 'couponsEnabled must be a boolean value (true or false).',
+      });
+    }
+
+    const enabledBool = couponsEnabled === true || couponsEnabled === 'true';
+    const settings = await getOrCreateGlobalSettings();
+    settings.couponsEnabled = enabledBool;
+    await settings.save();
+
+    const io = req.app.get('socketio');
+    if (io) {
+      io.emit('coupon:settingsUpdated', { couponsEnabled: enabledBool });
+    }
+
+    res.json({
+      success: true,
+      message: `Global customer coupons ${enabledBool ? 'enabled' : 'disabled'} successfully.`,
+      data: { couponsEnabled: enabledBool },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 // @desc    Get all coupons (Admin only)
 // @route   GET /api/coupons
@@ -105,6 +168,15 @@ const deleteCoupon = async (req, res) => {
 // @access  Public
 const validateCoupon = async (req, res) => {
   try {
+    const globalEnabled = await isGlobalCouponsEnabled();
+    if (!globalEnabled) {
+      return res.status(403).json({
+        success: false,
+        message: 'Coupons are currently disabled by the canteen admin.',
+        couponsEnabled: false,
+      });
+    }
+
     const { code, subtotal } = req.body;
 
     if (!code || !code.trim()) {
@@ -167,4 +239,12 @@ const validateCoupon = async (req, res) => {
   }
 };
 
-export { getCoupons, createCoupon, updateCoupon, deleteCoupon, validateCoupon };
+export {
+  getCoupons,
+  createCoupon,
+  updateCoupon,
+  deleteCoupon,
+  validateCoupon,
+  getCouponSettings,
+  updateCouponSettings,
+};

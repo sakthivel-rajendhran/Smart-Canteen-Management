@@ -13,6 +13,17 @@ const menuItemSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    categories: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Category',
+        index: true,
+      },
+    ],
+    adminReviewNote: {
+      type: String,
+      default: '',
+    },
     description: {
       type: String,
       default: '',
@@ -60,6 +71,7 @@ const menuItemSchema = new mongoose.Schema(
 
 // Compound index for optimized category and status filtering
 menuItemSchema.index({ category: 1, available: 1, featured: 1 });
+menuItemSchema.index({ categories: 1, available: 1, featured: 1 });
 
 const MenuItem = mongoose.model('MenuItem', menuItemSchema);
 export default MenuItem;

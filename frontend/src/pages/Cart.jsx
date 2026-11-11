@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import API from '../services/api';
+import { isItemParcelEligible } from '../utils/categoryHelpers';
 import { 
   Trash2, 
   ShoppingCart, 
@@ -20,11 +21,19 @@ const Cart = () => {
   const { 
     cart, 
     coupon, 
-    couponError, 
+    couponError,
+    couponsEnabled,
+    refreshCouponSettings,
+    parcelEnabled,
+    parcelChargePerItem,
+    refreshParcelSettings,
+    foodSubtotal,
+    parcelChargeTotal,
     subtotal, 
     discount, 
     total, 
     changeQuantity, 
+    changeItemServiceType,
     removeFromCart, 
     clearCart,
     applyCouponCode,
@@ -42,9 +51,16 @@ const Cart = () => {
   const [checkoutError, setCheckoutError] = useState('');
   const [successOrderCode, setSuccessOrderCode] = useState('');
 
+  useEffect(() => {
+    refreshCouponSettings();
+    refreshParcelSettings();
+    validateCartStock();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshCouponSettings, refreshParcelSettings]);
+
   const handleApplyCoupon = async (e) => {
     e.preventDefault();
-    if (!couponInput.trim()) return;
+    if (!couponsEnabled || !couponInput.trim()) return;
     try {
       await applyCouponCode(couponInput.trim());
       setCouponInput('');
@@ -75,8 +91,13 @@ const Cart = () => {
 
       // 2. Create order record on backend
       const orderData = {
-        items: cart,
-        couponCode: coupon ? coupon.code : '',
+        items: cart.map((i) => ({
+          menuItem: i.menuItem,
+          name: i.name,
+          quantity: i.quantity,
+          serviceType: parcelEnabled && i.serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL',
+        })),
+        couponCode: couponsEnabled && coupon ? coupon.code : '',
         paymentMethod: paymentMethod
       };
 
@@ -96,7 +117,7 @@ const Cart = () => {
         await handleRazorpayPayment(createdOrder);
       }
     } catch (err) {
-      setCheckoutError(err.message || 'An error occurred during checkout.');
+      setCheckoutError(err.response?.data?.message || err.message || 'An error occurred during checkout.');
     } finally {
       setCheckoutLoading(false);
     }
@@ -188,7 +209,7 @@ const Cart = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10 pb-20 relative">
+    <div className="max-w-6xl mx-auto px-4 py-10 pb-28 md:pb-20 relative">
       <h1 className="font-outfit font-black text-3xl text-primary-dark mb-8">My Cart 🛒</h1>
 
       {checkoutError && (
@@ -200,77 +221,145 @@ const Cart = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         {/* Left Side: Cart Items */}
-        <div className="lg:col-span-2 bg-white border border-border p-6 md:p-8 rounded-3xl shadow-sm">
+        <div className="lg:col-span-2 bg-white border border-border p-5 sm:p-6 md:p-8 rounded-3xl shadow-sm">
           <h2 className="font-outfit font-bold text-lg text-primary-dark mb-6 border-b border-border pb-3">
             {cart.length} Item(s) Selected
           </h2>
 
           <div className="flex flex-col gap-4">
-            {cart.map((item) => (
-              <div 
-                key={item.menuItem} 
-                className="flex items-center gap-4 py-4 border-b border-gray-100 last:border-b-0"
-              >
-                {item.image ? (
-                  <img
-                    src={item.image}
-                    alt={item.name}
-                    className="w-14 h-14 rounded-2xl object-cover border border-border shadow-sm flex-shrink-0"
-                  />
-                ) : (
-                  <div className="text-3xl w-14 h-14 bg-cream rounded-2xl flex items-center justify-center select-none flex-shrink-0">
-                    {item.emoji || '🍛'}
-                  </div>
-                )}
-                <div className="flex-1">
-                  <h3 className="font-outfit font-bold text-sm text-primary-dark">{item.name}</h3>
-                  <span className="text-xs text-amber font-bold">₹{item.price} each</span>
-                </div>
-                
-                {/* Quantity Controls */}
-                <div className="flex items-center border border-border rounded-full p-0.5">
-                  <button 
-                    onClick={() => changeQuantity(item.menuItem, -1)}
-                    className="w-8 h-8 bg-gray-50 hover:bg-primary-light text-primary-dark rounded-full font-bold flex items-center justify-center transition-all"
-                  >
-                    −
-                  </button>
-                  <span className="font-bold text-xs px-3 text-primary-dark">{item.quantity}</span>
-                  <button 
-                    onClick={() => changeQuantity(item.menuItem, 1)}
-                    className="w-8 h-8 bg-gray-50 hover:bg-primary-light text-primary-dark rounded-full font-bold flex items-center justify-center transition-all"
-                  >
-                    +
-                  </button>
-                </div>
+            {cart.map((item) => {
+              const itemParcelEligible = item.parcelEligible !== false && isItemParcelEligible(item);
+              const canParcel = parcelEnabled && itemParcelEligible;
+              const svcType = canParcel && item.serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL';
+              const isParcel = svcType === 'PARCEL';
+              const parcelPerUnit = isParcel ? Number(parcelChargePerItem) : 0;
+              const itemParcelTotal = Number((parcelPerUnit * item.quantity).toFixed(2));
+              const itemFoodTotal = Number((Number(item.price) * item.quantity).toFixed(2));
+              const itemLineTotal = Number((itemFoodTotal + itemParcelTotal).toFixed(2));
 
-                <span className="font-outfit font-black text-sm text-primary-dark min-w-[50px] text-right">
-                  ₹{item.price * item.quantity}
-                </span>
-
-                <button 
-                  onClick={() => removeFromCart(item.menuItem)}
-                  className="text-gray-300 hover:text-red-500 p-1 rounded-lg transition-all"
-                  title="Remove Item"
+              return (
+                <div
+                  key={`${item.menuItem}::${svcType}`}
+                  data-testid={`cart-item-${item.menuItem}-${svcType}`}
+                  className="flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-4 py-4 border-b border-gray-100 last:border-b-0"
                 >
-                  <Trash2 className="w-4.5 h-4.5" />
-                </button>
-              </div>
-            ))}
+                  {item.image ? (
+                    <img
+                      src={item.image}
+                      alt={item.name}
+                      className="w-14 h-14 rounded-2xl object-cover border border-border shadow-sm flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="text-3xl w-14 h-14 bg-cream rounded-2xl flex items-center justify-center select-none flex-shrink-0">
+                      {item.emoji || '🍛'}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-[140px]">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-outfit font-bold text-sm text-primary-dark break-words">{item.name}</h3>
+                      <span
+                        className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider border ${
+                          isParcel
+                            ? 'bg-amber/20 text-amber-dark border-amber/40'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        }`}
+                      >
+                        {isParcel ? `Parcel +₹${parcelPerUnit}` : canParcel ? 'Normal' : 'Normal Only'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-amber font-bold mt-0.5">
+                      ₹{item.price} × {item.quantity} = ₹{itemFoodTotal}
+                      {isParcel && (
+                        <span className="text-primary-dark/70 font-semibold ml-1.5">
+                          (+ ₹{itemParcelTotal} parcel)
+                        </span>
+                      )}
+                    </div>
+
+                    {canParcel && (
+                      <div className="inline-flex items-center gap-1 bg-cream border border-border rounded-lg p-0.5 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => changeItemServiceType(item.menuItem, svcType, 'NORMAL')}
+                          className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+                            !isParcel
+                              ? 'bg-primary-dark text-white shadow-2xs'
+                              : 'text-primary-dark/70 hover:text-primary-dark'
+                          }`}
+                        >
+                          Normal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => changeItemServiceType(item.menuItem, svcType, 'PARCEL')}
+                          className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+                            isParcel
+                              ? 'bg-amber text-primary-darker font-black shadow-2xs'
+                              : 'text-primary-dark/70 hover:text-primary-dark'
+                          }`}
+                        >
+                          Parcel +₹{parcelChargePerItem}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Quantity Controls */}
+                  <div className="flex items-center border border-border rounded-full p-0.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => changeQuantity(item.menuItem, -1, svcType)}
+                      className="w-8 h-8 bg-gray-50 hover:bg-primary-light text-primary-dark rounded-full font-bold flex items-center justify-center transition-all"
+                    >
+                      −
+                    </button>
+                    <span className="font-bold text-xs px-3 text-primary-dark">{item.quantity}</span>
+                    <button
+                      type="button"
+                      onClick={() => changeQuantity(item.menuItem, 1, svcType)}
+                      className="w-8 h-8 bg-gray-50 hover:bg-primary-light text-primary-dark rounded-full font-bold flex items-center justify-center transition-all"
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  <span className="font-outfit font-black text-sm text-primary-dark min-w-[56px] text-right ml-auto sm:ml-0">
+                    ₹{itemLineTotal}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => removeFromCart(item.menuItem, svcType)}
+                    className="text-gray-300 hover:text-red-500 p-1 rounded-lg transition-all shrink-0"
+                    title="Remove Item"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
 
         {/* Right Side: Bill Summary & Checkout */}
-        <div className="bg-white border border-border p-6 md:p-8 rounded-3xl shadow-sm lg:sticky lg:top-24">
+        <div className="bg-white border border-border p-5 sm:p-6 md:p-8 rounded-3xl shadow-sm lg:sticky lg:top-24">
           <h2 className="font-outfit font-bold text-lg text-primary-dark mb-6">Order Summary</h2>
 
           {/* Pricing breakdown */}
           <div className="flex flex-col gap-3 text-sm border-b border-border pb-4 mb-4">
             <div className="flex justify-between text-muted font-medium">
-              <span>Subtotal</span>
-              <span className="text-primary-dark font-semibold">₹{subtotal}</span>
+              <span>Food Subtotal</span>
+              <span className="text-primary-dark font-semibold">₹{foodSubtotal}</span>
             </div>
-            {discount > 0 && (
+            {(parcelChargeTotal > 0 || parcelEnabled) && (
+              <div className="flex justify-between text-muted font-medium">
+                <span>Parcel Charges</span>
+                <span className={`font-semibold ${parcelChargeTotal > 0 ? 'text-amber-dark' : 'text-primary-dark'}`}>
+                  ₹{parcelChargeTotal}
+                </span>
+              </div>
+            )}
+            {couponsEnabled && discount > 0 && (
               <div className="flex justify-between text-primary font-bold">
                 <span>Coupon Discount ({coupon?.code})</span>
                 <span>−₹{discount}</span>
@@ -279,48 +368,50 @@ const Cart = () => {
           </div>
 
           <div className="flex justify-between items-center mb-6">
-            <span className="font-outfit font-black text-lg text-primary-dark">Total</span>
+            <span className="font-outfit font-black text-lg text-primary-dark">Final Payable</span>
             <span className="font-outfit font-black text-2xl text-primary-dark">₹{total}</span>
           </div>
 
-          {/* Coupons Section */}
-          <div className="border-t border-b border-border py-4 mb-6">
-            <label className="block text-[10px] font-bold text-primary uppercase tracking-wider mb-2 flex items-center gap-1">
-              <Tag className="w-3.5 h-3.5" /> Apply Coupon Code
-            </label>
-            
-            {coupon ? (
-              <div className="flex items-center justify-between bg-primary-light border border-primary/20 rounded-xl px-4 py-2 text-xs text-primary-dark font-bold">
-                <span>🏷️ {coupon.code} applied</span>
-                <button onClick={removeCoupon} className="text-primary hover:text-red-500 focus:outline-none">
-                  <X className="w-4.5 h-4.5" />
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleApplyCoupon} className="flex gap-2">
-                <input
-                  type="text"
-                  value={couponInput}
-                  onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-                  placeholder="COUPON CODE"
-                  className="flex-1 bg-cream border-2 border-border focus:border-primary rounded-xl py-2 px-3 text-xs font-mono tracking-wider focus:outline-none transition-all uppercase"
-                />
-                <button 
-                  type="submit" 
-                  className="bg-primary-dark hover:bg-primary text-white text-xs font-bold px-4 py-2 rounded-xl transition-all"
-                >
-                  Apply
-                </button>
-              </form>
-            )}
+          {/* Coupons Section (Strictly visible only when globally enabled by Admin) */}
+          {couponsEnabled && (
+            <div className="border-t border-b border-border py-4 mb-6">
+              <label className="block text-[10px] font-bold text-primary uppercase tracking-wider mb-2 flex items-center gap-1">
+                <Tag className="w-3.5 h-3.5" /> Apply Coupon Code
+              </label>
+              
+              {coupon ? (
+                <div className="flex items-center justify-between bg-primary-light border border-primary/20 rounded-xl px-4 py-2 text-xs text-primary-dark font-bold">
+                  <span>🏷️ {coupon.code} applied</span>
+                  <button onClick={removeCoupon} className="text-primary hover:text-red-500 focus:outline-none">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleApplyCoupon} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={couponInput}
+                    onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                    placeholder="COUPON CODE"
+                    className="flex-1 min-w-0 bg-cream border-2 border-border focus:border-primary rounded-xl py-2 px-3 text-xs font-mono tracking-wider focus:outline-none transition-all uppercase"
+                  />
+                  <button 
+                    type="submit" 
+                    className="bg-primary-dark hover:bg-primary text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shrink-0"
+                  >
+                    Apply
+                  </button>
+                </form>
+              )}
 
-            {couponError && (
-              <span className="text-[10px] text-red-500 font-bold block mt-2">{couponError}</span>
-            )}
-            {!coupon && (
-              <span className="text-[9px] text-muted font-medium block mt-1.5">Try codes: DRS10, DRS20, or WELCOME</span>
-            )}
-          </div>
+              {couponError && (
+                <span className="text-[10px] text-red-500 font-bold block mt-2">{couponError}</span>
+              )}
+              {!coupon && (
+                <span className="text-[9px] text-muted font-medium block mt-1.5">Try codes: DRS10, DRS20, or WELCOME</span>
+              )}
+            </div>
+          )}
 
           {/* Payment Method selectors */}
           <div className="mb-8">

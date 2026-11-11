@@ -5,19 +5,30 @@ import { cache } from '../utils/cache.js';
 
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Helper to attach assigned menu item counts to category records
+// Helper to attach assigned menu item counts to category records (supports multi-category items)
 const attachItemCounts = async (categories) => {
   if (!Array.isArray(categories) || categories.length === 0) return [];
-  const counts = await MenuItem.aggregate([
-    { $group: { _id: '$category', count: { $sum: 1 } } },
-  ]);
-  const countMap = new Map(
-    counts.map((entry) => [entry._id ? entry._id.toString() : '', entry.count])
-  );
+  const items = await MenuItem.find({}).select('category categories').lean();
+  const countMap = new Map();
+
+  for (const item of items) {
+    const uniqueIds = new Set();
+    if (item.category) uniqueIds.add(String(item.category));
+    if (Array.isArray(item.categories)) {
+      for (const c of item.categories) {
+        if (c) uniqueIds.add(String(c));
+      }
+    }
+    for (const cid of uniqueIds) {
+      countMap.set(cid, (countMap.get(cid) || 0) + 1);
+    }
+  }
 
   return categories.map((cat) => {
     const plain = cat.toObject ? cat.toObject() : { ...cat };
     plain.itemCount = countMap.get(String(plain._id)) || 0;
+    const isSnacks = String(plain.name || '').trim().toLowerCase() === 'snacks';
+    plain.parcelEligible = isSnacks ? false : plain.parcelEligible !== false;
     return plain;
   });
 };
@@ -38,7 +49,7 @@ const getCategories = async (req, res) => {
 
     const filter = isAll ? {} : { active: { $ne: false } };
     const categories = await Category.find(filter)
-      .select('name active createdAt updatedAt')
+      .select('name active parcelEligible createdAt updatedAt')
       .sort({ name: 1 })
       .lean();
     const enrichedCategories = await attachItemCounts(categories);
@@ -58,7 +69,7 @@ const getCategories = async (req, res) => {
 // @access  Private/Admin
 const createCategory = async (req, res) => {
   try {
-    const { name, active } = req.body;
+    const { name, active, parcelEligible } = req.body;
     if (!name || !String(name).trim()) {
       return res.status(400).json({ success: false, message: 'Category name is required' });
     }
@@ -72,16 +83,24 @@ const createCategory = async (req, res) => {
     }
 
     const isActive = active === undefined ? true : Boolean(active === true || active === 'true');
+    const isSnacks = cleanName.toLowerCase() === 'snacks';
+    const isParcelEligible = isSnacks
+      ? false
+      : parcelEligible === undefined
+        ? true
+        : Boolean(parcelEligible === true || parcelEligible === 'true');
 
     const category = await Category.create({
       name: cleanName,
       active: isActive,
+      parcelEligible: isParcelEligible,
     });
 
     const payload = {
       _id: category._id,
       name: category.name,
       active: category.active,
+      parcelEligible: isSnacks ? false : category.parcelEligible !== false,
       createdAt: category.createdAt,
       updatedAt: category.updatedAt,
       itemCount: 0,
@@ -117,7 +136,7 @@ const updateCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Category not found' });
     }
 
-    const { name, active } = req.body;
+    const { name, active, parcelEligible } = req.body;
     const category = await Category.findById(req.params.id);
 
     if (!category) {
@@ -148,13 +167,23 @@ const updateCategory = async (req, res) => {
       category.active = Boolean(active === true || active === 'true');
     }
 
+    const isSnacks = String(category.name || '').trim().toLowerCase() === 'snacks';
+    if (isSnacks) {
+      category.parcelEligible = false;
+    } else if (parcelEligible !== undefined) {
+      category.parcelEligible = Boolean(parcelEligible === true || parcelEligible === 'true');
+    }
+
     await category.save();
 
-    const itemCount = await MenuItem.countDocuments({ category: category._id });
+    const itemCount = await MenuItem.countDocuments({
+      $or: [{ category: category._id }, { categories: category._id }],
+    });
     const payload = {
       _id: category._id,
       name: category.name,
       active: category.active,
+      parcelEligible: isSnacks ? false : category.parcelEligible !== false,
       createdAt: category.createdAt,
       updatedAt: category.updatedAt,
       itemCount,
@@ -196,7 +225,9 @@ const deleteCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Category not found' });
     }
 
-    const assignedCount = await MenuItem.countDocuments({ category: category._id });
+    const assignedCount = await MenuItem.countDocuments({
+      $or: [{ category: category._id }, { categories: category._id }],
+    });
     if (assignedCount > 0) {
       return res.status(400).json({
         success: false,

@@ -1,6 +1,13 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import API from '../services/api';
 import MenuCacheService from '../services/menuCache';
+import ParcelSettingsCard from './ParcelSettingsCard';
+import {
+  getItemCategories,
+  itemMatchesCategory,
+  itemMatchesCategorySearch,
+  syncItemCategoryUpdate,
+} from '../utils/categoryHelpers';
 import { useSocket } from '../context/SocketContext';
 import {
   Utensils,
@@ -56,6 +63,7 @@ const MenuManagement = () => {
   // Form states for Add / Edit
   const [formName, setFormName] = useState('');
   const [formCategory, setFormCategory] = useState('');
+  const [formAdditionalCategories, setFormAdditionalCategories] = useState([]);
   const [formPrice, setFormPrice] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formPreparationTime, setFormPreparationTime] = useState(10);
@@ -94,20 +102,7 @@ const MenuManagement = () => {
           .map((c) => (c._id === updatedCat._id ? updatedCat : c))
           .sort((a, b) => a.name.localeCompare(b.name))
       );
-      setMenuItems((prev) =>
-        prev.map((item) =>
-          item.category?._id === updatedCat._id
-            ? {
-                ...item,
-                category: {
-                  ...item.category,
-                  name: updatedCat.name,
-                  active: updatedCat.active,
-                },
-              }
-            : item
-        )
-      );
+      setMenuItems((prev) => prev.map((item) => syncItemCategoryUpdate(item, updatedCat)));
     };
 
     const handleCategoryDeleted = ({ id }) => {
@@ -169,11 +164,10 @@ const MenuManagement = () => {
         !q ||
         item.name.toLowerCase().includes(q) ||
         (item.description && item.description.toLowerCase().includes(q)) ||
-        (item.category?.name && item.category.name.toLowerCase().includes(q));
+        itemMatchesCategorySearch(item, q);
 
-      // Category
-      const matchesCategory =
-        selectedCategory === 'all' || item.category?._id === selectedCategory;
+      // Category (supports primary & multi-category assignments)
+      const matchesCategory = itemMatchesCategory(item, selectedCategory);
 
       // Availability
       const isAvail = item.available !== false;
@@ -248,6 +242,7 @@ const MenuManagement = () => {
   const resetForm = () => {
     setFormName('');
     setFormCategory(activeCategories.length > 0 ? activeCategories[0]._id : '');
+    setFormAdditionalCategories([]);
     setFormPrice('');
     setFormDescription('');
     setFormPreparationTime(10);
@@ -271,7 +266,12 @@ const MenuManagement = () => {
   const openEditModal = (item) => {
     setEditingItem(item);
     setFormName(item.name);
-    setFormCategory(item.category?._id || item.category || '');
+    const primaryCatId = item.category?._id || item.category || '';
+    setFormCategory(primaryCatId);
+    const extraCatIds = getItemCategories(item)
+      .map((c) => String(c._id))
+      .filter((id) => id && id !== String(primaryCatId));
+    setFormAdditionalCategories(extraCatIds);
     setFormPrice(item.price);
     setFormDescription(item.description || '');
     setFormPreparationTime(item.preparationTime || 10);
@@ -282,6 +282,12 @@ const MenuManagement = () => {
     setUploadProgressText('');
     setFormImagePreview(item.image?.url || (typeof item.image === 'string' ? item.image : '') || null);
     setFormValidationMsg('');
+  };
+
+  const toggleExtraCategory = (catId) => {
+    setFormAdditionalCategories((prev) =>
+      prev.includes(catId) ? prev.filter((id) => id !== catId) : [...prev, catId]
+    );
   };
 
   // Submit Add Food
@@ -297,6 +303,7 @@ const MenuManagement = () => {
       const formData = new FormData();
       formData.append('name', formName);
       formData.append('category', formCategory);
+      formData.append('categories', JSON.stringify([formCategory, ...formAdditionalCategories].filter(Boolean)));
       formData.append('price', formPrice);
       formData.append('description', formDescription);
       formData.append('preparationTime', formPreparationTime);
@@ -337,6 +344,7 @@ const MenuManagement = () => {
       const formData = new FormData();
       formData.append('name', formName);
       formData.append('category', formCategory);
+      formData.append('categories', JSON.stringify([formCategory, ...formAdditionalCategories].filter(Boolean)));
       formData.append('price', formPrice);
       formData.append('description', formDescription);
       formData.append('preparationTime', formPreparationTime);
@@ -525,6 +533,9 @@ const MenuManagement = () => {
           </div>
         </div>
       )}
+
+      {/* Per-Item Parcel Packaging Configuration */}
+      <ParcelSettingsCard socket={socket} />
 
       {/* Section 29: Admin Dashboard Image Statistics */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 mb-8">
@@ -754,9 +765,19 @@ const MenuManagement = () => {
                             </button>
                           </div>
                           <div>
-                            <span className="font-bold text-primary-dark block leading-snug">
-                              {item.name}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-primary-dark leading-snug">
+                                {item.name}
+                              </span>
+                              {item.adminReviewNote && (
+                                <span
+                                  title={item.adminReviewNote}
+                                  className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber/25 text-amber-dark border border-amber/40"
+                                >
+                                  Admin Review
+                                </span>
+                              )}
+                            </div>
                             <span className="text-[10px] text-muted block leading-none font-medium truncate max-w-[240px] mt-0.5">
                               {item.description || 'No description provided.'}
                             </span>
@@ -766,16 +787,21 @@ const MenuManagement = () => {
 
                       {/* Category */}
                       <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-flex items-center font-bold rounded-full px-3 py-1 text-[10px] ${
-                            item.category?.active === false
-                              ? 'bg-gray-100 text-gray-600'
-                              : 'bg-primary-light text-primary-dark'
-                          }`}
-                        >
-                          {item.category?.name || 'Canteen'}
-                          {item.category?.active === false ? ' (Inactive)' : ''}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {getItemCategories(item).map((catObj) => (
+                            <span
+                              key={catObj._id || catObj.name}
+                              className={`inline-flex items-center font-bold rounded-full px-2.5 py-0.5 text-[10px] ${
+                                catObj.active === false
+                                  ? 'bg-gray-100 text-gray-600'
+                                  : 'bg-primary-light text-primary-dark'
+                              }`}
+                            >
+                              {catObj.name || 'Canteen'}
+                              {catObj.active === false ? ' (Inactive)' : ''}
+                            </span>
+                          ))}
+                        </div>
                       </td>
 
                       {/* Price */}
@@ -916,8 +942,9 @@ const MenuManagement = () => {
                   </div>
 
                   <span className="text-[10px] text-muted mb-4 block">
-                    {item.category?.name || 'Canteen'}
-                    {item.category?.active === false ? ' (Inactive)' : ''}
+                    {getItemCategories(item)
+                      .map((c) => `${c.name}${c.active === false ? ' (Inactive)' : ''}`)
+                      .join(' · ') || 'Canteen'}
                   </span>
 
                   {/* Actions Row */}
@@ -1032,6 +1059,36 @@ const MenuManagement = () => {
                   />
                 </div>
               </div>
+
+              {activeCategories.filter((c) => c._id !== formCategory).length > 0 && (
+                <div>
+                  <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                    Also Display In Categories (Optional)
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {activeCategories
+                      .filter((c) => c._id !== formCategory)
+                      .map((cat) => {
+                        const checked = formAdditionalCategories.includes(cat._id);
+                        return (
+                          <button
+                            key={cat._id}
+                            type="button"
+                            onClick={() => toggleExtraCategory(cat._id)}
+                            className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${
+                              checked
+                                ? 'bg-primary text-white border-primary shadow-2xs'
+                                : 'bg-cream text-primary-dark border-border hover:border-primary/40'
+                            }`}
+                          >
+                            {checked ? '✓ ' : '+ '}
+                            {cat.name}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
@@ -1222,6 +1279,13 @@ const MenuManagement = () => {
                 </div>
               )}
 
+              {editingItem?.adminReviewNote && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-900 text-xs p-3 rounded-xl font-semibold flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                  <span>{editingItem.adminReviewNote}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
                   Food Name
@@ -1272,6 +1336,36 @@ const MenuManagement = () => {
                   />
                 </div>
               </div>
+
+              {activeCategories.filter((c) => c._id !== formCategory).length > 0 && (
+                <div>
+                  <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                    Also Display In Categories (Optional)
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {activeCategories
+                      .filter((c) => c._id !== formCategory)
+                      .map((cat) => {
+                        const checked = formAdditionalCategories.includes(cat._id);
+                        return (
+                          <button
+                            key={cat._id}
+                            type="button"
+                            onClick={() => toggleExtraCategory(cat._id)}
+                            className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${
+                              checked
+                                ? 'bg-primary text-white border-primary shadow-2xs'
+                                : 'bg-cream text-primary-dark border-border hover:border-primary/40'
+                            }`}
+                          >
+                            {checked ? '✓ ' : '+ '}
+                            {cat.name}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">

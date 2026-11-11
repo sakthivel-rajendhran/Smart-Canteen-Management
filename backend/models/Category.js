@@ -14,6 +14,10 @@ const categorySchema = new mongoose.Schema(
       default: true,
       index: true,
     },
+    parcelEligible: {
+      type: Boolean,
+      default: true,
+    },
   },
   {
     timestamps: true,
