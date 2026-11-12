@@ -1,6 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import API from '../services/api';
-import { signOutFirebaseIfInitialized } from '../config/firebase';
 
 const AuthContext = createContext(null);
 
@@ -67,28 +66,6 @@ export const AuthProvider = ({ children }) => {
     throw new Error(response.data?.message || 'Registration failed');
   };
 
-  const loginWithGoogle = async ({ firebaseIdToken, credential, code }) => {
-    const response = await API.post('/auth/google', {
-      ...(firebaseIdToken ? { firebaseIdToken } : {}),
-      ...(credential ? { credential } : {}),
-      ...(code ? { code } : {}),
-    });
-    if (response.data?.success) {
-      persistSession(response.data.data);
-      return response.data;
-    }
-    throw new Error(response.data?.message || 'Google authentication failed');
-  };
-
-  const exchangeGoogleSession = async (exchangeToken) => {
-    const response = await API.post('/auth/google/exchange', { exchangeToken });
-    if (response.data?.success) {
-      persistSession(response.data.data);
-      return response.data;
-    }
-    throw new Error(response.data?.message || 'Google session exchange failed');
-  };
-
   const updateProfile = async (name, email, phone, details = {}) => {
     const payload = { name, email, phone, ...details };
     const response = await API.put('/auth/profile', payload);
@@ -105,17 +82,11 @@ export const AuthProvider = ({ children }) => {
 
   const changePassword = async (oldPassword, newPassword) => {
     const response = await API.put('/auth/change-password', { oldPassword, newPassword });
-    if (response.data?.success && user) {
-      const updatedSession = { ...user, hasPassword: true };
-      localStorage.setItem('drs_user', JSON.stringify(updatedSession));
-      setUser(updatedSession);
-    }
     return response.data;
   };
 
   const logout = () => {
     setAuthStatus('LOGGING_OUT');
-    signOutFirebaseIfInitialized();
     localStorage.removeItem('drs_user');
     localStorage.removeItem('drs_cart');
     setUser(null);
@@ -141,8 +112,6 @@ export const AuthProvider = ({ children }) => {
         isAdmin,
         login,
         register,
-        loginWithGoogle,
-        exchangeGoogleSession,
         updateProfile,
         changePassword,
         logout,

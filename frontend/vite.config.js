@@ -9,9 +9,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
-          if (id.includes('@firebase') || id.includes('/idb/') || id.includes('tslib')) {
-            return 'vendor-firebase';
-          }
           if (
             id.includes('recharts') ||
             id.includes('victory-vendor') ||

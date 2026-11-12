@@ -1,8 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import API from '../services/api';
-import { getEnvFirebaseConfig, getFirebaseAuthClient } from '../config/firebase';
 import {
   Eye,
   EyeOff,
@@ -18,67 +16,9 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
-const GoogleLogo = () => (
-  <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-    <path
-      fill="#4285F4"
-      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-    />
-    <path
-      fill="#34A853"
-      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
-    />
-    <path
-      fill="#FBBC05"
-      d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
-    />
-    <path
-      fill="#EA4335"
-      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
-    />
-  </svg>
-);
-
-const formatFirebaseAuthError = (err) => {
-  if (err?.code === 'auth/unauthorized-domain') {
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
-    return `Domain "${host}" is not authorized in Firebase Authentication. Add "${host}" under Firebase Console → Authentication → Settings → Authorized domains.`;
-  }
-  if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
-    return 'Google sign-in popup was closed. Please try again.';
-  }
-  return (
-    err?.response?.data?.message ||
-    err?.message ||
-    'Unable to authenticate with Google via Firebase.'
-  );
-};
-
-const loadGoogleIdentityScript = () =>
-  new Promise((resolve, reject) => {
-    if (window.google?.accounts?.id) {
-      resolve(window.google);
-      return;
-    }
-    const existing = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve(window.google));
-      existing.addEventListener('error', () => reject(new Error('Failed to load Google Sign-In')));
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve(window.google);
-    script.onerror = () => reject(new Error('Failed to load Google Sign-In SDK'));
-    document.head.appendChild(script);
-  });
-
 const Login = () => {
-  const { user, login, register, loginWithGoogle, exchangeGoogleSession } = useAuth();
+  const { user, login, register } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
 
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [showPassword, setShowPassword] = useState(false);
@@ -86,28 +26,12 @@ const Login = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [googleSubmitting, setGoogleSubmitting] = useState(false);
-  const [showGisFallback, setShowGisFallback] = useState(false);
-  const gisFallbackRef = useRef(null);
 
   // Core Form inputs
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-
-  // Public Firebase / Google OAuth config from env & server
-  const [authProviderConfig, setAuthProviderConfig] = useState(() => {
-    const envFirebase = getEnvFirebaseConfig();
-    return {
-      loaded: false,
-      firebase: envFirebase,
-      firebaseConfigured: Boolean(envFirebase),
-      configured: Boolean(envFirebase || import.meta.env.VITE_GOOGLE_CLIENT_ID),
-      clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
-      oauthCodeFlow: false,
-    };
-  });
 
   // Password strength indicator
   const [pwStrength, setPwStrength] = useState({
@@ -133,90 +57,12 @@ const Login = () => {
     }
   }, [user, redirectUserAfterAuth]);
 
-  // Fetch public Firebase/Google OAuth config & complete redirect flows if present
-  useEffect(() => {
-    let active = true;
-
-    const completeFirebaseRedirectIfNeeded = async (serverFirebaseCfg) => {
-      const fb = await getFirebaseAuthClient(serverFirebaseCfg);
-      if (!fb) return;
-      try {
-        const result = await fb.getRedirectResult(fb.auth);
-        if (result?.user && active) {
-          setGoogleSubmitting(true);
-          const firebaseIdToken = await result.user.getIdToken(true);
-          const authRes = await loginWithGoogle({ firebaseIdToken });
-          setSuccess('Signed in with Google. Redirecting...');
-          redirectUserAfterAuth(authRes.data);
-        }
-      } catch (err) {
-        if (active) {
-          setError(formatFirebaseAuthError(err));
-          setGoogleSubmitting(false);
-        }
-      }
-    };
-
-    const initAuthConfig = async () => {
-      try {
-        const res = await API.get('/auth/google/config');
-        const srv = res.data?.success && res.data.data ? res.data.data : {};
-        const envFirebase = getEnvFirebaseConfig();
-        const resolvedFirebase = envFirebase || srv.firebase || null;
-        if (active) {
-          setAuthProviderConfig({
-            loaded: true,
-            firebase: resolvedFirebase,
-            firebaseConfigured: Boolean(resolvedFirebase),
-            configured: Boolean(resolvedFirebase || srv.configured || import.meta.env.VITE_GOOGLE_CLIENT_ID),
-            clientId: srv.clientId || import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
-            oauthCodeFlow: Boolean(srv.oauthCodeFlow),
-          });
-        }
-        await completeFirebaseRedirectIfNeeded(resolvedFirebase);
-      } catch {
-        const envFirebase = getEnvFirebaseConfig();
-        if (active) {
-          setAuthProviderConfig((prev) => ({ ...prev, loaded: true }));
-        }
-        await completeFirebaseRedirectIfNeeded(envFirebase);
-      }
-    };
-    initAuthConfig();
-
-    const params = new URLSearchParams(location.search);
-    const exchangeToken = params.get('googleExchange');
-    const googleError = params.get('googleError');
-
-    if (googleError) {
-      setError(googleError);
-      navigate('/login', { replace: true });
-    } else if (exchangeToken) {
-      setGoogleSubmitting(true);
-      exchangeGoogleSession(exchangeToken)
-        .then((res) => {
-          setSuccess('Signed in with Google. Redirecting...');
-          redirectUserAfterAuth(res.data);
-        })
-        .catch((err) => {
-          setError(err.response?.data?.message || err.message || 'Google login failed.');
-          setGoogleSubmitting(false);
-          navigate('/login', { replace: true });
-        });
-    }
-
-    return () => {
-      active = false;
-    };
-  }, [location.search, exchangeGoogleSession, loginWithGoogle, navigate, redirectUserAfterAuth]);
-
   const handleModeSwitch = (nextMode) => {
     setMode(nextMode);
     setError('');
     setSuccess('');
     setPassword('');
     setConfirmPassword('');
-    setShowGisFallback(false);
     setPwStrength({ score: 0, label: '', colorClass: 'bg-gray-200', textClass: 'text-gray-400' });
   };
 
@@ -245,120 +91,6 @@ const Login = () => {
   };
 
   const validateEmail = (em) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em);
-
-  const handleGoogleCredentialResponse = useCallback(
-    async (credentialResponse) => {
-      if (!credentialResponse?.credential) {
-        setError('Google did not return a valid identity credential.');
-        setGoogleSubmitting(false);
-        return;
-      }
-      try {
-        setError('');
-        setGoogleSubmitting(true);
-        const res = await loginWithGoogle({ credential: credentialResponse.credential });
-        setSuccess('Signed in with Google. Redirecting...');
-        setTimeout(() => redirectUserAfterAuth(res.data), 400);
-      } catch (err) {
-        setError(
-          err.response?.data?.message || err.message || 'Unable to authenticate with Google.'
-        );
-        setGoogleSubmitting(false);
-      }
-    },
-    [loginWithGoogle, redirectUserAfterAuth]
-  );
-
-  // Render Google Identity button in fallback container only if One Tap prompt is suppressed
-  useEffect(() => {
-    if (!showGisFallback || !authProviderConfig.clientId || !gisFallbackRef.current) return;
-    let cancelled = false;
-    loadGoogleIdentityScript()
-      .then((g) => {
-        if (cancelled || !g?.accounts?.id || !gisFallbackRef.current) return;
-        g.accounts.id.initialize({
-          client_id: authProviderConfig.clientId,
-          callback: handleGoogleCredentialResponse,
-        });
-        gisFallbackRef.current.innerHTML = '';
-        g.accounts.id.renderButton(gisFallbackRef.current, {
-          theme: 'outline',
-          size: 'large',
-          type: 'standard',
-          shape: 'rectangular',
-          text: 'continue_with',
-          width: Math.min(360, gisFallbackRef.current.offsetWidth || 320),
-        });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [showGisFallback, authProviderConfig.clientId, handleGoogleCredentialResponse]);
-
-  const handleContinueWithGoogle = async () => {
-    setError('');
-    setSuccess('');
-
-    // Primary flow: Firebase Google Authentication
-    const fb = await getFirebaseAuthClient(authProviderConfig.firebase);
-    if (fb) {
-      setGoogleSubmitting(true);
-      try {
-        const result = await fb.signInWithPopup(fb.auth, fb.googleProvider);
-        const firebaseIdToken = await result.user.getIdToken(true);
-        const authRes = await loginWithGoogle({ firebaseIdToken });
-        setSuccess('Signed in with Google. Redirecting...');
-        setTimeout(() => redirectUserAfterAuth(authRes.data), 400);
-      } catch (err) {
-        if (err?.code === 'auth/popup-blocked') {
-          await fb.signInWithRedirect(fb.auth, fb.googleProvider);
-          return;
-        }
-        setError(formatFirebaseAuthError(err));
-        setGoogleSubmitting(false);
-      }
-      return;
-    }
-
-    // Secondary fallback: Direct Google OIDC flow if configured instead of Firebase
-    if (authProviderConfig.oauthCodeFlow) {
-      setGoogleSubmitting(true);
-      const apiBase = String(API.defaults.baseURL || '/api').replace(/\/+$/, '');
-      window.location.href = `${apiBase}/auth/google`;
-      return;
-    }
-
-    if (authProviderConfig.clientId) {
-      setGoogleSubmitting(true);
-      try {
-        const g = await loadGoogleIdentityScript();
-        if (!g?.accounts?.id) {
-          throw new Error('Google Identity Services failed to initialize.');
-        }
-
-        g.accounts.id.initialize({
-          client_id: authProviderConfig.clientId,
-          callback: handleGoogleCredentialResponse,
-        });
-
-        g.accounts.id.prompt((notification) => {
-          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-            setGoogleSubmitting(false);
-            setShowGisFallback(true);
-          }
-        });
-      } catch (err) {
-        setError(err.message || 'Unable to start Google Sign-In.');
-        setGoogleSubmitting(false);
-      }
-      return;
-    }
-
-    setError(
-      'Firebase Google Sign-In is not configured yet. Add VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, and VITE_FIREBASE_PROJECT_ID in frontend/.env and FIREBASE_PROJECT_ID in backend/.env.'
-    );
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -528,33 +260,6 @@ const Login = () => {
             </div>
           )}
 
-          {/* Continue with Google Button */}
-          <button
-            type="button"
-            data-testid="google-auth-btn"
-            onClick={handleContinueWithGoogle}
-            disabled={googleSubmitting || submitting}
-            className="w-full h-12 bg-white text-gray-800 font-semibold text-sm border border-gray-300 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-400 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all shadow-xs disabled:opacity-60 cursor-pointer"
-          >
-            <GoogleLogo />
-            <span>{googleSubmitting ? 'Connecting to Google...' : 'Continue with Google'}</span>
-          </button>
-
-          {showGisFallback && (
-            <div className="mt-3 flex flex-col items-center">
-              <div ref={gisFallbackRef} className="w-full flex justify-center" />
-            </div>
-          )}
-
-          {/* OR Divider */}
-          <div className="relative my-5 flex items-center">
-            <div className="flex-1 border-t border-gray-200" />
-            <span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider bg-white">
-              OR
-            </span>
-            <div className="flex-1 border-t border-gray-200" />
-          </div>
-
           {/* Email / Password Form */}
           <form onSubmit={handleSubmit} className="flex flex-col gap-3.5" noValidate>
             {isSignUp && (
@@ -696,7 +401,7 @@ const Login = () => {
             <button
               type="submit"
               data-testid="auth-submit-btn"
-              disabled={submitting || googleSubmitting}
+              disabled={submitting}
               className="w-full h-12 bg-primary-dark text-white font-bold text-sm rounded-xl hover:bg-primary active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all flex items-center justify-center gap-2 shadow-md shadow-primary/15 disabled:bg-gray-400 disabled:shadow-none mt-1 cursor-pointer"
             >
               <span>

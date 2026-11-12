@@ -12,14 +12,6 @@ services:
         value: 10000
       - key: CLIENT_URL
         value: https://smart-canteen-management-two.vercel.app
-      - key: FIREBASE_PROJECT_ID
-        value: drs-6ca6e
-      - key: FIREBASE_AUTH_DOMAIN
-        value: drs-6ca6e.firebaseapp.com
-      - key: FIREBASE_API_KEY
-        sync: false
-      - key: FIREBASE_APP_ID
-        sync: false
       - key: MONGO_URI
         sync: false
       - key: JWT_SECRET
