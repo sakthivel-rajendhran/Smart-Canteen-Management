@@ -139,6 +139,16 @@ function App() {
                           <BillHistory />
                         </AdminRoute>
                       } />
+                      <Route path="/admin/revenue" element={
+                        <AdminRoute>
+                          <BillHistory />
+                        </AdminRoute>
+                      } />
+                      <Route path="/admin/reports" element={
+                        <AdminRoute>
+                          <BillHistory />
+                        </AdminRoute>
+                      } />
                       <Route path="/admin/menu" element={
                         <AdminRoute>
                           <MenuManagement />

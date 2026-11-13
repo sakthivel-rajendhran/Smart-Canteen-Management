@@ -8,6 +8,7 @@ import API from '../services/api';
 export default function ParcelSettingsCard({ socket }) {
   const [parcelEnabled, setParcelEnabled] = useState(true);
   const [parcelChargeInput, setParcelChargeInput] = useState('5');
+  const [savedConfig, setSavedConfig] = useState({ enabled: true, charge: '5' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -15,8 +16,11 @@ export default function ParcelSettingsCard({ socket }) {
 
   const syncFromPayload = (data) => {
     if (!data) return;
-    setParcelEnabled(data.parcelEnabled !== false);
-    setParcelChargeInput(String(data.parcelChargePerItem ?? 5));
+    const enabled = data.parcelEnabled !== false;
+    const charge = String(data.parcelChargePerItem ?? 5);
+    setParcelEnabled(enabled);
+    setParcelChargeInput(charge);
+    setSavedConfig({ enabled, charge });
   };
 
   useEffect(() => {
@@ -85,24 +89,33 @@ export default function ParcelSettingsCard({ socket }) {
   };
 
   const previewCharge = Math.max(0, Number(parcelChargeInput) || 0);
+  const hasUnsavedChanges =
+    !loading &&
+    (parcelEnabled !== savedConfig.enabled ||
+      String(parcelChargeInput).trim() !== String(savedConfig.charge).trim());
 
   return (
-    <div className="bg-white border border-border rounded-3xl p-4 sm:p-5 shadow-sm mb-6">
+    <div
+      data-testid="parcel-settings-card"
+      className="bg-white border border-border rounded-3xl p-4 sm:p-5 shadow-sm mb-6"
+    >
       <form
         onSubmit={handleSave}
         className="flex flex-col lg:flex-row lg:items-center justify-between gap-4"
       >
-        <div className="flex items-start gap-3">
+        {/* Left Section: Icon, Title, Status Badge & Short Description */}
+        <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
           <div className="w-10 h-10 rounded-2xl bg-amber/15 border border-amber/30 flex items-center justify-center shrink-0 text-amber-dark">
             <Package className="w-5 h-5" />
           </div>
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-outfit font-bold text-primary-dark text-sm sm:text-base">
+              <h3 className="font-outfit font-bold text-primary-dark text-sm sm:text-base leading-tight">
                 Parcel Packaging Settings
               </h3>
               <span
-                className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
+                data-testid="parcel-status-badge"
+                className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
                   parcelEnabled
                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                     : 'bg-red-50 text-red-600 border border-red-200'
@@ -110,17 +123,28 @@ export default function ParcelSettingsCard({ socket }) {
               >
                 {parcelEnabled ? 'Parcel ON' : 'Parcel OFF'}
               </span>
+              {hasUnsavedChanges && (
+                <span
+                  data-testid="parcel-unsaved-badge"
+                  className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-light text-amber-dark border border-amber/30 shrink-0"
+                >
+                  Unsaved changes
+                </span>
+              )}
             </div>
-            <p className="text-muted text-xs mt-0.5">
+            <p className="text-muted text-xs mt-1 leading-snug">
               {parcelEnabled
-                ? `Eligible categories (Food Items / Juices): Normal (₹0 extra) or Parcel (+₹${previewCharge} per item). Snacks are strictly Normal-only.`
+                ? `Food Items / Juices: Normal (₹0 extra) or Parcel (+₹${previewCharge} per item). Snacks remain Normal-only.`
                 : 'Parcel selection is hidden across all categories and disabled on orders.'}
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Enable Parcel Option Switch */}
+        {/* Right Section: Toggle, Charge Input & Save Button in One Aligned Row */}
+        <div
+          data-testid="parcel-controls-row"
+          className="flex flex-wrap lg:flex-nowrap items-center gap-2.5 shrink-0 w-full lg:w-auto"
+        >
           <button
             type="button"
             disabled={loading || saving}
@@ -131,22 +155,21 @@ export default function ParcelSettingsCard({ socket }) {
             }}
             aria-pressed={parcelEnabled}
             data-testid="toggle-parcel-enabled"
-            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold transition-all ${
+            className={`h-10 inline-flex items-center justify-center gap-2 px-3.5 rounded-xl border text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
               parcelEnabled
-                ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
+                ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm hover:bg-emerald-700'
                 : 'bg-stone-100 text-stone-700 border-stone-300 hover:bg-stone-200'
             }`}
           >
             <span
-              className={`w-2 h-2 rounded-full ${
+              className={`w-2 h-2 rounded-full shrink-0 ${
                 parcelEnabled ? 'bg-white' : 'bg-stone-400'
               }`}
             />
-            Parcel Option: {parcelEnabled ? 'ON' : 'OFF'}
+            <span>Parcel Option: {parcelEnabled ? 'ON' : 'OFF'}</span>
           </button>
 
-          {/* Parcel Charge Per Item (₹) */}
-          <div className="flex items-center gap-2 bg-cream border border-border rounded-xl px-3 py-1.5">
+          <div className="h-10 flex items-center gap-2 bg-cream border border-border rounded-xl px-3 shrink-0">
             <label
               htmlFor="parcelChargeInput"
               className="text-[11px] font-bold text-primary-dark whitespace-nowrap"
@@ -166,7 +189,7 @@ export default function ParcelSettingsCard({ socket }) {
                 setSuccessMsg('');
                 setParcelChargeInput(e.target.value);
               }}
-              className="w-20 bg-white border border-border focus:border-primary rounded-lg px-2.5 py-1 text-xs font-bold text-primary-dark text-right focus:outline-none"
+              className="w-16 bg-white border border-border focus:border-primary rounded-lg px-2 py-1 text-xs font-bold text-primary-dark text-right focus:outline-none"
             />
           </div>
 
@@ -174,14 +197,14 @@ export default function ParcelSettingsCard({ socket }) {
             type="submit"
             disabled={loading || saving}
             data-testid="save-parcel-settings"
-            className="inline-flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-sm disabled:opacity-60"
+            className="h-10 inline-flex items-center justify-center gap-1.5 bg-primary hover:bg-primary-dark text-white font-bold text-xs px-4 rounded-xl transition-all shadow-sm disabled:opacity-60 whitespace-nowrap shrink-0 cursor-pointer"
           >
             {saving ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
             ) : (
-              <Save className="w-3.5 h-3.5" />
+              <Save className="w-3.5 h-3.5 shrink-0" />
             )}
-            {saving ? 'Saving...' : 'Save Settings'}
+            <span>{saving ? 'Saving...' : 'Save Settings'}</span>
           </button>
         </div>
       </form>

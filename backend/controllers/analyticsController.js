@@ -11,8 +11,13 @@ const getAnalyticsOverview = async (req, res) => {
       return res.json(cached);
     }
 
+    // Current calendar date in Asia/Kolkata (IST: UTC+05:30)
+    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    const istTodayStart = new Date(`${todayStr}T00:00:00.000+05:30`);
+    const istTodayEnd = new Date(`${todayStr}T23:59:59.999+05:30`);
+
     // Run aggregations in parallel for high performance
-    const [stats, statusCounts] = await Promise.all([
+    const [stats, statusCounts, todayStats] = await Promise.all([
       Order.aggregate([
         {
           $group: {
@@ -30,10 +35,30 @@ const getAnalyticsOverview = async (req, res) => {
           },
         },
       ]),
+      Order.aggregate([
+        {
+          $match: {
+            status: { $in: ['Handover Bill', 'Completed'] },
+            $or: [
+              { completedAt: { $gte: istTodayStart, $lte: istTodayEnd } },
+              { completedAt: null, createdAt: { $gte: istTodayStart, $lte: istTodayEnd } },
+            ],
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            todayRevenue: { $sum: '$total' },
+            todayOrders: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const revenue = stats.length > 0 ? stats[0].totalRevenue : 0;
     const ordersCount = stats.length > 0 ? stats[0].totalOrders : 0;
+    const todayRevenue = todayStats.length > 0 ? todayStats[0].todayRevenue : 0;
+    const todayOrders = todayStats.length > 0 ? todayStats[0].todayOrders : 0;
 
     const statusMap = { Placed: 0, Confirmed: 0, Preparing: 0, Ready: 0, Completed: 0, Cancelled: 0 };
     statusCounts.forEach((item) => {
@@ -47,6 +72,8 @@ const getAnalyticsOverview = async (req, res) => {
       data: {
         totalRevenue: revenue,
         totalOrders: ordersCount,
+        todayRevenue,
+        todayOrders,
         statusBreakdown: statusMap,
       },
     };

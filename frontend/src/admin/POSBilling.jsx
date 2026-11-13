@@ -23,7 +23,6 @@ import {
   Sparkles,
   RefreshCw,
   Banknote,
-  QrCode,
   CheckCircle2,
   AlertCircle,
   X,
@@ -41,13 +40,12 @@ const POSBilling = () => {
   // Search & Category Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
-  const [vegOnly, setVegOnly] = useState(false);
 
   // Billing Cart State
   const [cart, setCart] = useState([]);
   const [selectedVariants, setSelectedVariants] = useState({});
   const [discount, setDiscount] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'upi'
+  const paymentMethod = 'cash'; // POS billing strictly supports Cash Payment
   const [cashGiven, setCashGiven] = useState('');
   const [parcelSettings, setParcelSettings] = useState({
     parcelEnabled: true,
@@ -212,11 +210,6 @@ const POSBilling = () => {
         return false;
       }
 
-      // Veg filter
-      if (vegOnly && !item.isVeg) {
-        return false;
-      }
-
       // Search text filter
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -227,7 +220,7 @@ const POSBilling = () => {
 
       return true;
     });
-  }, [activeMenuItems, selectedCategory, vegOnly, searchQuery]);
+  }, [activeMenuItems, selectedCategory, searchQuery]);
 
   const getSelectedVariantForItem = (item) => {
     const variants = getItemVariants(item);
@@ -371,7 +364,6 @@ const POSBilling = () => {
     setCart([]);
     setDiscount(0);
     setCashGiven('');
-    setPaymentMethod('cash');
   };
 
   // Calculations
@@ -614,22 +606,6 @@ const POSBilling = () => {
                   </button>
                 </div>
               )}
-
-              {/* Veg Only toggle */}
-              <button
-                type="button"
-                onClick={() => setVegOnly(!vegOnly)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition shrink-0 ${
-                  vegOnly
-                    ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
-                    : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'
-                }`}
-              >
-                <span className="w-3 h-3 rounded-full border border-emerald-600 flex items-center justify-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
-                </span>
-                <span>Veg Only</span>
-              </button>
 
               {/* Reload Menu */}
               <button
@@ -991,42 +967,21 @@ const POSBilling = () => {
             {/* Cart Footer Controls (Shrink-0) */}
             <div className="shrink-0 pt-2.5 border-t border-stone-200 space-y-2.5">
               
-              {/* Payment Mode Selection (Cash vs UPI QR) */}
+              {/* Payment Mode Selection (Cash Payment Only) */}
               <div className="space-y-1.5">
                 <span className="text-[10px] font-black uppercase tracking-wider text-stone-500 block">
                   Select Payment Method
                 </span>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('cash')}
-                    className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-black border transition-all ${
-                      paymentMethod === 'cash'
-                        ? 'bg-[#0b3d2e] text-white border-[#0b3d2e] shadow-xs'
-                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    <Banknote className="w-4 h-4 text-amber" />
-                    <span>Cash Payment</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('upi')}
-                    className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-black border transition-all ${
-                      paymentMethod === 'upi'
-                        ? 'bg-[#0b3d2e] text-white border-[#0b3d2e] shadow-xs'
-                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    <QrCode className="w-4 h-4 text-amber" />
-                    <span>UPI QR Code</span>
-                  </button>
+                <div
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-black bg-[#0b3d2e] text-white border border-[#0b3d2e] shadow-xs select-none"
+                >
+                  <Banknote className="w-4 h-4 text-amber" />
+                  <span>Cash Payment</span>
                 </div>
               </div>
 
               {/* Cash Given & Change Helper (Visible when Cash selected) */}
-              {paymentMethod === 'cash' && grandTotal > 0 && (
+              {grandTotal > 0 && (
                 <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-2.5 space-y-1.5 animate-in fade-in text-xs">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-stone-700">Cash Received from Customer:</span>
@@ -1081,44 +1036,6 @@ const POSBilling = () => {
                         ₹{val}
                       </button>
                     ))}
-                  </div>
-                </div>
-              )}
-
-              {/* UPI QR Display Interface (Visible when UPI selected) */}
-              {paymentMethod === 'upi' && (
-                <div className="bg-emerald-50/90 border border-emerald-300 rounded-2xl p-2.5 space-y-2 animate-in fade-in">
-                  <div className="flex items-center gap-3">
-                    <div className="w-16 h-16 bg-white p-1 rounded-xl border border-emerald-200 shadow-xs flex items-center justify-center shrink-0">
-                      <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(
-                          `upi://pay?pa=drsquickserve@canteen&pn=DRS%20Quick%20Serve&am=${grandTotal.toFixed(
-                            2
-                          )}&cu=INR`
-                        )}`}
-                        alt="UPI QR Code"
-                        className="w-full h-full object-contain"
-                      />
-                    </div>
-                    <div className="flex-1 min-w-0 text-left">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-black uppercase text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">
-                          Scan & Pay
-                        </span>
-                        <span className="text-xs font-outfit font-black text-emerald-950">
-                          ₹{grandTotal.toFixed(2)}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-stone-600 font-medium mt-0.5 truncate">
-                        GPay • PhonePe • Paytm • BHIM
-                      </p>
-                      <div className="text-[9px] font-mono text-stone-500 mt-0.5">
-                        UPI: <strong>drsquickserve@canteen</strong>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-[10px] text-emerald-800 bg-emerald-100/60 rounded-lg p-1.5 text-center font-semibold">
-                    Customer scans QR & pays • Verify confirmation on counter soundbox / phone
                   </div>
                 </div>
               )}
@@ -1181,8 +1098,7 @@ const POSBilling = () => {
                   <>
                     <Printer className="w-4.5 h-4.5 text-amber" />
                     <span>
-                      {paymentMethod === 'cash' ? 'Confirm Cash & Print Bill' : 'Confirm UPI & Print Bill'}{' '}
-                      (₹{grandTotal.toFixed(2)})
+                      Confirm Cash & Print Bill (₹{grandTotal.toFixed(2)})
                     </span>
                   </>
                 )}

@@ -148,9 +148,25 @@ const Login = () => {
         }, 500);
       }
     } catch (err) {
-      setError(
-        err.response?.data?.message || err.message || 'Authentication failed. Please try again.'
-      );
+      const isNetworkError =
+        err.message === 'Network Error' ||
+        err.code === 'ERR_NETWORK' ||
+        err.code === 'ECONNABORTED' ||
+        !err.response;
+
+      let msg =
+        err.response?.data?.message || err.message || 'Authentication failed. Please try again.';
+
+      if (isNetworkError) {
+        if (typeof window !== 'undefined' && !window.navigator.onLine) {
+          msg = 'You appear to be offline. Please check your internet connection.';
+        } else {
+          msg =
+            'Unable to reach the canteen server. The backend may be waking up from sleep (Render free tier takes ~30–50s on cold start) or your connection was interrupted. Please wait a few moments and try again.';
+        }
+      }
+
+      setError(msg);
       setSubmitting(false);
     }
   };
@@ -233,7 +249,7 @@ const Login = () => {
             </h1>
             <p className="text-muted text-sm">
               {isSignUp
-                ? 'Join DRS Quick Serve and order easily.'
+                ? 'Join DRS Quick Serve and order your favourite food easily.'
                 : 'Sign in to continue ordering your favourite food.'}
             </p>
           </div>

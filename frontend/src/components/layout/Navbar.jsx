@@ -51,6 +51,9 @@ const Navbar = () => {
     if (path === '/admin/live-tracking') {
       return location.pathname === '/admin/live-tracking' || location.pathname === '/admin/orders';
     }
+    if (path === '/admin/bills') {
+      return location.pathname === '/admin/bills' || location.pathname === '/admin/revenue' || location.pathname === '/admin/reports';
+    }
     return location.pathname === path;
   };
 
@@ -130,7 +133,7 @@ const Navbar = () => {
     { label: 'POS Billing', path: '/admin/pos', icon: <Zap className="w-3.5 h-3.5" /> },
     { label: 'Live Queue', path: '/admin/live-tracking', icon: <ClipboardList className="w-3.5 h-3.5" /> },
     { label: 'Handover', path: '/admin/handover', icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
-    { label: 'Bill Archive', path: '/admin/bills', icon: <Receipt className="w-3.5 h-3.5" /> },
+    { label: 'Revenue Report', path: '/admin/bills', icon: <Receipt className="w-3.5 h-3.5" /> },
   ];
 
   // Menu Control Dropdown Submenu Items

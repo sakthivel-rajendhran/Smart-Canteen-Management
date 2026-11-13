@@ -2,6 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../services/api';
 import ThermalReceiptModal from '../components/common/ThermalReceiptModal';
+import RevenueReportPDFModal from '../components/common/RevenueReportPDFModal';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+} from 'recharts';
 import {
   Receipt,
   Search,
@@ -26,11 +35,42 @@ import {
   ExternalLink,
   Settings,
   X,
+  FileDown,
+  TrendingUp,
+  BarChart3,
+  CalendarRange,
+  ChevronDown,
 } from 'lucide-react';
+
+const DATE_TABS = [
+  { id: 'today', label: 'Today' },
+  { id: 'yesterday', label: 'Yesterday' },
+  { id: '7days', label: 'Last 7 Days' },
+  { id: '30days', label: 'Last 30 Days' },
+  { id: '3months', label: '3 Months' },
+  { id: '6months', label: '6 Months' },
+  { id: 'custom', label: 'Custom Range' },
+];
+
+/**
+ * Format IST Date for Charts & Labels
+ */
+const formatISTShort = (dateStr) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+  }).format(d);
+};
 
 const BillHistory = () => {
   // Archive data & summary
   const [bills, setBills] = useState([]);
+  const [dailyTrends, setDailyTrends] = useState([]);
+  const [filterInfo, setFilterInfo] = useState({});
   const [summary, setSummary] = useState({
     totalCompletedOrders: 0,
     totalSales: 0,
@@ -43,14 +83,25 @@ const BillHistory = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Filters
+  // 7 Date Filter Options
   const [dateRange, setDateRange] = useState('today'); // 'today' | 'yesterday' | '7days' | '30days' | '3months' | '6months' | 'custom'
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [customRangeError, setCustomRangeError] = useState('');
+
+  // Search & Additional Filters
   const [orderType, setOrderType] = useState('ALL'); // 'ALL' | 'ONLINE' | 'WALK_IN'
   const [paymentMethod, setPaymentMethod] = useState('ALL'); // 'ALL' | 'cash' | 'upi' | 'card' | 'razorpay'
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+
+  // UI state
+  const [showCharts, setShowCharts] = useState(true);
+
+  // PDF Export Modal State
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [exportBills, setExportBills] = useState([]);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   // Reprint Receipt Modal State
   const [reprintOrder, setReprintOrder] = useState(null);
@@ -67,14 +118,27 @@ const BillHistory = () => {
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupSuccessMessage, setCleanupSuccessMessage] = useState('');
 
+  // Current calendar date in Asia/Kolkata (IST: UTC+05:30)
+  const todayIST = useMemo(() => {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  }, []);
+
   useEffect(() => {
-    fetchBills();
-  }, [dateRange, startDate, endDate, orderType, paymentMethod, page]);
+    if (dateRange === 'custom') {
+      // For custom range, only fetch if both dates are provided
+      if (startDate && endDate && endDate >= startDate) {
+        fetchBills();
+      }
+    } else {
+      fetchBills();
+    }
+  }, [dateRange, orderType, paymentMethod, page]);
 
   const fetchBills = async () => {
     try {
       setLoading(true);
       setError('');
+      setCustomRangeError('');
 
       const params = {
         dateRange,
@@ -86,8 +150,12 @@ const BillHistory = () => {
       };
 
       if (dateRange === 'custom') {
-        if (startDate) params.startDate = startDate;
-        if (endDate) params.endDate = endDate;
+        if (!startDate || !endDate) {
+          setLoading(false);
+          return;
+        }
+        params.startDate = startDate;
+        params.endDate = endDate;
       }
 
       const res = await API.get('/admin/bills', { params });
@@ -95,6 +163,8 @@ const BillHistory = () => {
         setBills(res.data.data || []);
         if (res.data.summary) setSummary(res.data.summary);
         if (res.data.pagination) setPagination(res.data.pagination);
+        if (res.data.dailyTrends) setDailyTrends(res.data.dailyTrends);
+        if (res.data.filterInfo) setFilterInfo(res.data.filterInfo);
       }
     } catch (err) {
       console.error('Failed to fetch bill archive:', err);
@@ -102,6 +172,26 @@ const BillHistory = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleApplyCustomRange = (e) => {
+    e.preventDefault();
+    if (!startDate || !endDate) {
+      setCustomRangeError('Please choose both start date and end date.');
+      return;
+    }
+    if (endDate < startDate) {
+      setCustomRangeError('End date cannot be earlier than start date.');
+      return;
+    }
+    if (startDate > todayIST || endDate > todayIST) {
+      setCustomRangeError('Future dates cannot be selected.');
+      return;
+    }
+
+    setCustomRangeError('');
+    setPage(1);
+    fetchBills();
   };
 
   const handleSearchSubmit = (e) => {
@@ -113,6 +203,42 @@ const BillHistory = () => {
   const openReprint = (bill) => {
     setReprintOrder(bill);
     setReprintModalOpen(true);
+  };
+
+  // Open PDF Preview Modal (fetches all matching records for full period accuracy)
+  const handleOpenPDF = async () => {
+    try {
+      setPdfLoading(true);
+      const params = {
+        dateRange,
+        orderType,
+        paymentMethod,
+        search: search.trim(),
+        exportAll: true,
+      };
+
+      if (dateRange === 'custom') {
+        if (startDate) params.startDate = startDate;
+        if (endDate) params.endDate = endDate;
+      }
+
+      const res = await API.get('/admin/bills', { params });
+      if (res.data?.success) {
+        setExportBills(res.data.data || bills);
+        if (res.data.summary) setSummary(res.data.summary);
+        if (res.data.filterInfo) setFilterInfo(res.data.filterInfo);
+        if (res.data.dailyTrends) setDailyTrends(res.data.dailyTrends);
+      } else {
+        setExportBills(bills);
+      }
+      setPdfModalOpen(true);
+    } catch (err) {
+      console.error('Failed to load full period records for PDF:', err);
+      setExportBills(bills);
+      setPdfModalOpen(true);
+    } finally {
+      setPdfLoading(false);
+    }
   };
 
   // Retention Settings fetch & save
@@ -173,7 +299,6 @@ const BillHistory = () => {
         setCleanupSuccessMessage(res.data.message);
         setCleanupPreview(null);
         fetchBills();
-        // Update local settings display
         const setRes = await API.get('/admin/settings/bill-retention');
         if (setRes.data?.success) setRetentionSettings(setRes.data.data);
       }
@@ -183,6 +308,42 @@ const BillHistory = () => {
       setCleanupLoading(false);
     }
   };
+
+  // Chart Tooltip
+  const CustomChartTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <div className="bg-[#0b3d2e] text-white p-3 rounded-2xl shadow-xl text-xs border border-white/10">
+          <p className="text-[10px] text-amber font-bold uppercase tracking-wider mb-1">
+            {label}
+          </p>
+          <div className="space-y-0.5">
+            <p className="font-mono font-black text-sm text-white">
+              Revenue: ₹{Number(data.revenue || 0).toFixed(2)}
+            </p>
+            <p className="text-stone-300 text-[11px]">
+              Orders: <span className="font-bold text-white">{data.orders || 0}</span>
+            </p>
+            <div className="pt-1 mt-1 border-t border-white/10 text-[10px] text-stone-300 flex gap-2">
+              <span>Cash: ₹{Number(data.cash || 0).toFixed(2)}</span>
+              <span>Digital: ₹{Number(data.digital || 0).toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const chartData = useMemo(() => {
+    return dailyTrends.map((d) => ({
+      ...d,
+      displayDate: formatISTShort(d._id),
+    }));
+  }, [dailyTrends]);
+
+  const currentTabObj = DATE_TABS.find((t) => t.id === dateRange) || DATE_TABS[0];
 
   return (
     <div className="min-h-screen bg-stone-100/70 pb-20 font-inter text-text">
@@ -195,8 +356,18 @@ const BillHistory = () => {
         autoPrint={false}
       />
 
+      {/* Official Revenue Report PDF Preview & Print Modal */}
+      <RevenueReportPDFModal
+        isOpen={pdfModalOpen}
+        onClose={() => setPdfModalOpen(false)}
+        filterInfo={filterInfo}
+        summary={summary}
+        dailyTrends={dailyTrends}
+        bills={exportBills.length > 0 ? exportBills : bills}
+      />
+
       {/* Top Header */}
-      <div className="bg-[#0b3d2e] text-white px-4 py-3 shadow-md border-b border-white/10 sticky top-16 z-30">
+      <div className="bg-[#0b3d2e] text-white px-4 py-3.5 shadow-md border-b border-white/10 sticky top-16 z-30">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
           
           <div className="flex items-center gap-3">
@@ -206,24 +377,38 @@ const BillHistory = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-outfit font-black text-base sm:text-lg tracking-tight">
-                  Bill History & Sales Archive
+                  Revenue Reports & Bill Archive
                 </h1>
                 <span className="bg-amber/20 border border-amber/40 text-amber text-[10px] font-black uppercase px-2 py-0.5 rounded-full">
-                  3–6 Months Archive
+                  IST Audit Verified
                 </span>
               </div>
               <p className="text-[11px] text-white/70">
-                Read-only sales snapshots • Thermal reprinting • Retention management
+                Period revenue reports • Recharts trend analytics • Downloadable PDF • Retention policy
               </p>
             </div>
           </div>
 
-          {/* Quick links & Retention button */}
-          <div className="flex items-center gap-2.5">
+          {/* Top Action Buttons */}
+          <div className="flex items-center gap-2">
+            
+            {/* Downloaded PDF Report Button */}
+            <button
+              type="button"
+              onClick={handleOpenPDF}
+              disabled={pdfLoading || loading}
+              className="flex items-center gap-1.5 bg-amber hover:bg-amber-dark text-stone-950 font-black text-xs px-3.5 py-2 rounded-xl transition shadow-sm active:scale-95 disabled:opacity-50"
+              title="Download official PDF report for current date range"
+            >
+              <FileDown className={`w-3.5 h-3.5 ${pdfLoading ? 'animate-bounce' : ''}`} />
+              <span>{pdfLoading ? 'Preparing PDF...' : 'Download PDF Report'}</span>
+            </button>
+
+            {/* Retention Settings */}
             <button
               type="button"
               onClick={openRetentionModal}
-              className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition border border-white/10"
+              className="hidden sm:flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3 py-2 rounded-xl transition border border-white/10"
               title="Retention Settings & Safe Cleanup"
             >
               <Settings className="w-3.5 h-3.5 text-amber" />
@@ -232,14 +417,14 @@ const BillHistory = () => {
 
             <Link
               to="/admin/pos"
-              className="flex items-center gap-1.5 bg-amber hover:bg-amber-dark text-stone-950 font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-sm"
+              className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3 py-2 rounded-xl transition border border-white/10"
             >
               <span>+ POS Sale</span>
             </Link>
 
             <Link
               to="/admin/handover"
-              className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition border border-white/10"
+              className="hidden md:flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs px-3 py-2 rounded-xl transition border border-white/10"
             >
               <span>Handover Queue</span>
             </Link>
@@ -250,138 +435,191 @@ const BillHistory = () => {
 
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         
-        {/* ================= REAL-TIME KPI SUMMARY METRICS ================= */}
+        {/* ================= REAL-TIME REVENUE SUMMARY KPI CARDS ================= */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
           
           {/* Total Completed Orders */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-sm flex flex-col justify-between">
+          <div className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
             <div className="flex items-center justify-between text-stone-500 mb-1">
               <span className="text-[11px] font-bold uppercase tracking-wider">Completed Orders</span>
               <Receipt className="w-4 h-4 text-[#0b3d2e]" />
             </div>
-            <div className="font-outfit font-black text-2xl sm:text-3xl text-stone-900">
+            <div className="font-outfit font-black text-2xl sm:text-3xl text-stone-900 font-mono">
               {summary.totalCompletedOrders || 0}
             </div>
-            <span className="text-[10px] text-stone-400 font-medium">In selected date filter</span>
+            <span className="text-[10px] text-stone-400 font-medium">
+              In period ({currentTabObj.label})
+            </span>
           </div>
 
-          {/* Total Sales Revenue */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-sm flex flex-col justify-between">
+          {/* Gross Revenue */}
+          <div className="bg-white rounded-3xl p-4 sm:p-5 border border-emerald-200/80 shadow-sm flex flex-col justify-between hover:shadow-md transition bg-gradient-to-br from-white to-emerald-50/30">
             <div className="flex items-center justify-between text-stone-500 mb-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Total Revenue</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Gross Revenue</span>
               <IndianRupee className="w-4 h-4 text-emerald-600" />
             </div>
-            <div className="font-outfit font-black text-2xl sm:text-3xl text-emerald-600">
+            <div className="font-outfit font-black text-2xl sm:text-3xl text-emerald-600 font-mono">
               ₹{(summary.totalSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
             </div>
-            <span className="text-[10px] text-stone-400 font-medium">Gross canteen sales</span>
+            <span className="text-[10px] text-emerald-600/80 font-medium">
+              Matches period dashboard
+            </span>
           </div>
 
-          {/* Online vs Walk-in Split */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-sm flex flex-col justify-between">
+          {/* Sales Channel (Online vs Walk-in) */}
+          <div className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
             <div className="flex items-center justify-between text-stone-500 mb-1">
               <span className="text-[11px] font-bold uppercase tracking-wider">Sales Channel</span>
               <Smartphone className="w-4 h-4 text-indigo-500" />
             </div>
-            <div className="flex items-baseline justify-between text-xs">
-              <span className="font-bold text-stone-600">Online:</span>
-              <span className="font-outfit font-black text-stone-900">₹{(summary.onlineSales || 0).toFixed(2)}</span>
-            </div>
-            <div className="flex items-baseline justify-between text-xs mt-0.5">
-              <span className="font-bold text-amber-700">Walk-in:</span>
+            <div className="flex items-baseline justify-between text-xs font-mono">
+              <span className="font-bold text-stone-600 font-sans">Walk-in:</span>
               <span className="font-outfit font-black text-stone-900">₹{(summary.walkInSales || 0).toFixed(2)}</span>
+            </div>
+            <div className="flex items-baseline justify-between text-xs mt-0.5 font-mono">
+              <span className="font-bold text-indigo-700 font-sans">Online:</span>
+              <span className="font-outfit font-black text-stone-900">₹{(summary.onlineSales || 0).toFixed(2)}</span>
             </div>
           </div>
 
-          {/* Cash vs Digital Split */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-sm flex flex-col justify-between">
+          {/* Payment Mode (Cash vs Digital) */}
+          <div className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
             <div className="flex items-center justify-between text-stone-500 mb-1">
               <span className="text-[11px] font-bold uppercase tracking-wider">Payment Mode</span>
               <Banknote className="w-4 h-4 text-amber-600" />
             </div>
-            <div className="flex items-baseline justify-between text-xs">
-              <span className="font-bold text-emerald-700">Cash:</span>
+            <div className="flex items-baseline justify-between text-xs font-mono">
+              <span className="font-bold text-emerald-700 font-sans">Cash:</span>
               <span className="font-outfit font-black text-stone-900">₹{(summary.cashSales || 0).toFixed(2)}</span>
             </div>
-            <div className="flex items-baseline justify-between text-xs mt-0.5">
-              <span className="font-bold text-blue-700">Digital / UPI:</span>
+            <div className="flex items-baseline justify-between text-xs mt-0.5 font-mono">
+              <span className="font-bold text-blue-700 font-sans">Digital / UPI:</span>
               <span className="font-outfit font-black text-stone-900">₹{(summary.digitalSales || 0).toFixed(2)}</span>
             </div>
           </div>
 
         </div>
 
-        {/* ================= FILTER & SEARCH CONTROL BAR ================= */}
+        {/* ================= COMPACT DATE FILTER CONTROL BAR ================= */}
         <div className="bg-white rounded-3xl p-4 sm:p-5 shadow-sm border border-stone-200 space-y-4">
           
-          {/* Row 1: Date Range Selector Pills */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            <span className="text-xs font-bold text-stone-500 uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5" /> Date:
-            </span>
-            {[
-              { id: 'today', label: 'Today' },
-              { id: 'yesterday', label: 'Yesterday' },
-              { id: '7days', label: 'Last 7 Days' },
-              { id: '30days', label: 'Last 30 Days' },
-              { id: '3months', label: '3 Months' },
-              { id: '6months', label: '6 Months' },
-              { id: 'custom', label: 'Custom Range' },
-            ].map((tab) => (
+          {/* Row 1: Segmented Date Filter Bar labelled "Date:" */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none w-full lg:w-auto">
+              <span className="text-xs font-black text-[#0b3d2e] uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1.5 bg-stone-100 px-2.5 py-1.5 rounded-xl border border-stone-200">
+                <Calendar className="w-3.5 h-3.5 text-[#0b3d2e]" /> Date:
+              </span>
+
+              {/* Exact 7 Options: Segmented Selector Pills */}
+              {DATE_TABS.map((tab) => {
+                const isActive = dateRange === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setDateRange(tab.id);
+                      setPage(1);
+                    }}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all active:scale-95 ${
+                      isActive
+                        ? 'bg-[#0b3d2e] text-white shadow-xs'
+                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quick Chart Toggle & Selected Range Indicator */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[11px] font-mono font-bold text-stone-500 bg-stone-50 border border-stone-200 px-2.5 py-1 rounded-lg hidden sm:inline-block">
+                Active: <strong className="text-[#0b3d2e]">{currentTabObj.label}</strong>
+              </span>
+
               <button
-                key={tab.id}
                 type="button"
-                onClick={() => {
-                  setDateRange(tab.id);
-                  setPage(1);
-                }}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all ${
-                  dateRange === tab.id
-                    ? 'bg-[#0b3d2e] text-white shadow-xs'
-                    : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                }`}
+                onClick={() => setShowCharts((prev) => !prev)}
+                className="flex items-center gap-1 text-xs font-bold text-stone-600 hover:text-[#0b3d2e] bg-stone-100 hover:bg-stone-200 px-2.5 py-1.5 rounded-xl transition border border-stone-200"
               >
-                {tab.label}
+                <TrendingUp className="w-3.5 h-3.5 text-amber-dark" />
+                <span>{showCharts ? 'Hide Charts' : 'Show Charts'}</span>
               </button>
-            ))}
+            </div>
+
           </div>
 
-          {/* Custom Date Pickers (visible when custom selected) */}
+          {/* Custom Date Pickers (visible only when 'custom' is selected) */}
           {dateRange === 'custom' && (
-            <div className="flex flex-wrap items-center gap-3 bg-stone-50 p-3 rounded-2xl border border-stone-200">
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-semibold text-stone-600">From:</span>
+            <form
+              onSubmit={handleApplyCustomRange}
+              className="flex flex-wrap items-center gap-3 bg-stone-50 p-3.5 rounded-2xl border border-stone-200 text-xs"
+            >
+              <div className="flex items-center gap-1.5 font-bold text-[#0b3d2e]">
+                <CalendarRange className="w-4 h-4 text-amber-dark" />
+                <span>Custom Range:</span>
+              </div>
+
+              {/* Start Date Picker */}
+              <div className="flex items-center gap-1.5">
+                <label className="font-semibold text-stone-600">Start Date:</label>
                 <input
                   type="date"
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  max={todayIST}
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    setCustomRangeError('');
+                  }}
                   className="px-2.5 py-1.5 bg-white border border-stone-200 rounded-lg text-xs font-medium focus:outline-none focus:border-[#0b3d2e]"
+                  required
                 />
               </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-semibold text-stone-600">To:</span>
+
+              {/* End Date Picker */}
+              <div className="flex items-center gap-1.5">
+                <label className="font-semibold text-stone-600">End Date:</label>
                 <input
                   type="date"
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
+                  min={startDate || undefined}
+                  max={todayIST}
+                  onChange={(e) => {
+                    setEndDate(e.target.value);
+                    setCustomRangeError('');
+                  }}
                   className="px-2.5 py-1.5 bg-white border border-stone-200 rounded-lg text-xs font-medium focus:outline-none focus:border-[#0b3d2e]"
+                  required
                 />
               </div>
+
+              {/* Apply Button */}
               <button
-                type="button"
-                onClick={() => {
-                  setPage(1);
-                  fetchBills();
-                }}
-                className="px-3.5 py-1.5 bg-[#0b3d2e] text-white text-xs font-bold rounded-lg hover:bg-[#1a7a45] transition"
+                type="submit"
+                disabled={loading}
+                className="px-4 py-1.5 bg-[#0b3d2e] hover:bg-[#1a7a45] text-white text-xs font-bold rounded-lg transition active:scale-95 shadow-2xs"
               >
                 Apply Range
               </button>
-            </div>
+
+              <span className="text-[10px] text-stone-400">
+                (Dates up to today in IST: {todayIST})
+              </span>
+
+              {customRangeError && (
+                <div className="w-full text-red-600 font-bold text-[11px] flex items-center gap-1 mt-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>{customRangeError}</span>
+                </div>
+              )}
+            </form>
           )}
 
-          {/* Row 2: Search Input & Dropdown Filters */}
-          <div className="flex flex-col sm:flex-row items-center gap-3">
+          {/* Row 2: Search Input & Channel/Payment Filters */}
+          <div className="flex flex-col sm:flex-row items-center gap-3 pt-1 border-t border-stone-100">
             
             {/* Search Input */}
             <form onSubmit={handleSearchSubmit} className="relative flex-1 w-full">
@@ -437,7 +675,7 @@ const BillHistory = () => {
               onClick={fetchBills}
               disabled={loading}
               className="p-2.5 text-stone-500 hover:text-[#0b3d2e] hover:bg-stone-100 rounded-xl transition border border-stone-200"
-              title="Refresh bills"
+              title="Refresh report records"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -446,13 +684,182 @@ const BillHistory = () => {
 
         </div>
 
-        {/* ================= BILL ARCHIVE TABLE ================= */}
+        {/* ================= CHARTS SECTION: PERIOD REVENUE TREND ================= */}
+        {showCharts && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            
+            {/* Daily Revenue Trend Area Chart */}
+            <div className="lg:col-span-2 bg-white rounded-3xl p-5 sm:p-6 border border-stone-200 shadow-sm flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-outfit font-black text-base text-stone-900 flex items-center gap-1.5">
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                    Revenue Trend ({currentTabObj.label})
+                  </h3>
+                  <p className="text-[11px] text-stone-500">
+                    Daily sales aggregation in Asia/Kolkata (IST)
+                  </p>
+                </div>
+                <span className="text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-800 font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider font-mono">
+                  ₹{(summary.totalSales || 0).toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div className="h-60 w-full">
+                {chartData.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-stone-400 text-xs gap-1">
+                    <span className="text-2xl">📊</span>
+                    <span>No completed transaction records in this selected period.</span>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="revenuePeriodGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#0b3d2e" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#1A7A45" stopOpacity={0.0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis
+                        dataKey="displayDate"
+                        tickLine={false}
+                        axisLine={false}
+                        tick={{ fontSize: 10, fill: '#78716c', fontWeight: 600 }}
+                      />
+                      <YAxis
+                        tickLine={false}
+                        axisLine={false}
+                        tick={{ fontSize: 10, fill: '#78716c', fontWeight: 600 }}
+                      />
+                      <Tooltip content={<CustomChartTooltip />} />
+                      <Area
+                        type="monotone"
+                        dataKey="revenue"
+                        stroke="#0b3d2e"
+                        strokeWidth={2.5}
+                        fillOpacity={1}
+                        fill="url(#revenuePeriodGrad)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+
+            {/* Quick Metrics Breakdown Card */}
+            <div className="bg-white rounded-3xl p-5 sm:p-6 border border-stone-200 shadow-sm flex flex-col justify-between">
+              <div>
+                <h3 className="font-outfit font-black text-base text-stone-900 mb-1 flex items-center gap-1.5">
+                  <BarChart3 className="w-4 h-4 text-amber-600" />
+                  Period Breakdown
+                </h3>
+                <p className="text-[11px] text-stone-500 mb-4">
+                  Financial ratio for selected date filter
+                </p>
+
+                <div className="space-y-3.5 text-xs">
+                  
+                  {/* Walk-in vs Online Bar */}
+                  <div>
+                    <div className="flex justify-between text-stone-600 mb-1">
+                      <span className="font-bold">Walk-in vs Online:</span>
+                      <span className="font-mono font-bold text-stone-900">
+                        {summary.totalSales > 0
+                          ? Math.round((summary.walkInSales / summary.totalSales) * 100)
+                          : 0}% Walk-in
+                      </span>
+                    </div>
+                    <div className="w-full h-2.5 bg-stone-100 rounded-full overflow-hidden flex">
+                      <div
+                        className="bg-amber h-full"
+                        style={{
+                          width: `${summary.totalSales > 0 ? (summary.walkInSales / summary.totalSales) * 100 : 0}%`,
+                        }}
+                      />
+                      <div
+                        className="bg-indigo-600 h-full"
+                        style={{
+                          width: `${summary.totalSales > 0 ? (summary.onlineSales / summary.totalSales) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-stone-400 mt-1">
+                      <span>Walk-in: ₹{Number(summary.walkInSales || 0).toFixed(2)}</span>
+                      <span>Online: ₹{Number(summary.onlineSales || 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {/* Cash vs Digital Bar */}
+                  <div>
+                    <div className="flex justify-between text-stone-600 mb-1">
+                      <span className="font-bold">Cash vs Digital:</span>
+                      <span className="font-mono font-bold text-stone-900">
+                        {summary.totalSales > 0
+                          ? Math.round((summary.cashSales / summary.totalSales) * 100)
+                          : 0}% Cash
+                      </span>
+                    </div>
+                    <div className="w-full h-2.5 bg-stone-100 rounded-full overflow-hidden flex">
+                      <div
+                        className="bg-emerald-600 h-full"
+                        style={{
+                          width: `${summary.totalSales > 0 ? (summary.cashSales / summary.totalSales) * 100 : 0}%`,
+                        }}
+                      />
+                      <div
+                        className="bg-blue-600 h-full"
+                        style={{
+                          width: `${summary.totalSales > 0 ? (summary.digitalSales / summary.totalSales) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-stone-400 mt-1">
+                      <span>Cash: ₹{Number(summary.cashSales || 0).toFixed(2)}</span>
+                      <span>Digital: ₹{Number(summary.digitalSales || 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {/* Average Order Value */}
+                  <div className="pt-2 border-t border-stone-100 flex items-center justify-between">
+                    <span className="text-stone-500 font-medium">Avg Order Value:</span>
+                    <span className="font-outfit font-black text-stone-900 text-sm font-mono">
+                      ₹{summary.totalCompletedOrders > 0
+                        ? (summary.totalSales / summary.totalCompletedOrders).toFixed(2)
+                        : '0.00'}
+                    </span>
+                  </div>
+
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-stone-100 mt-4">
+                <button
+                  type="button"
+                  onClick={handleOpenPDF}
+                  className="w-full flex items-center justify-center gap-1.5 bg-[#0b3d2e] hover:bg-[#1a7a45] text-white text-xs font-bold py-2 px-3 rounded-xl transition"
+                >
+                  <FileDown className="w-3.5 h-3.5 text-amber" />
+                  <span>Export Report to PDF</span>
+                </button>
+              </div>
+
+            </div>
+
+          </div>
+        )}
+
+        {/* ================= BILL ARCHIVE & SALES TABLE ================= */}
         <div className="bg-white rounded-3xl shadow-sm border border-stone-200 overflow-hidden">
           
           <div className="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
-            <h3 className="font-outfit font-black text-base text-stone-900">
-              Completed Sales Records ({pagination.total})
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-outfit font-black text-base text-stone-900">
+                Completed Sales Records ({pagination.total})
+              </h3>
+              <span className="text-xs bg-stone-100 text-stone-600 font-bold px-2 py-0.5 rounded-full">
+                {currentTabObj.label}
+              </span>
+            </div>
             <span className="text-xs text-stone-500">
               Page {pagination.page} of {pagination.totalPages}
             </span>
@@ -462,7 +869,7 @@ const BillHistory = () => {
             <div className="py-24 text-center">
               <div className="w-10 h-10 border-4 border-stone-200 border-t-[#0b3d2e] rounded-full animate-spin mx-auto mb-3" />
               <span className="text-stone-500 text-xs font-bold uppercase tracking-wider">
-                Retrieving bill archive...
+                Retrieving period sales records...
               </span>
             </div>
           ) : bills.length === 0 ? (
@@ -472,7 +879,7 @@ const BillHistory = () => {
                 No Bills Found
               </h4>
               <p className="text-stone-500 text-xs max-w-sm mx-auto">
-                No completed orders match the chosen date range or filter criteria.
+                No completed orders match the chosen date range ({currentTabObj.label}) or filter criteria.
               </p>
             </div>
           ) : (
@@ -481,7 +888,7 @@ const BillHistory = () => {
                 <thead>
                   <tr className="bg-stone-50/80 border-b border-stone-200 text-stone-500 font-bold uppercase text-[10px] tracking-wider">
                     <th className="py-3 px-4">Token & Order ID</th>
-                    <th className="py-3 px-4">Date / Time</th>
+                    <th className="py-3 px-4">Date / Time (IST)</th>
                     <th className="py-3 px-4">Channel</th>
                     <th className="py-3 px-4">Customer Details</th>
                     <th className="py-3 px-4">Items Summary</th>
@@ -506,10 +913,12 @@ const BillHistory = () => {
 
                     const dateObj = new Date(bill.completedAt || bill.createdAt);
                     const formattedDate = dateObj.toLocaleDateString('en-IN', {
+                      timeZone: 'Asia/Kolkata',
                       day: '2-digit',
                       month: 'short',
                     });
                     const formattedTime = dateObj.toLocaleTimeString('en-IN', {
+                      timeZone: 'Asia/Kolkata',
                       hour: '2-digit',
                       minute: '2-digit',
                       hour12: true,
@@ -531,7 +940,7 @@ const BillHistory = () => {
                         {/* Date */}
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <div className="font-bold text-stone-800">{formattedDate}</div>
-                          <div className="text-[10px] text-stone-500">{formattedTime}</div>
+                          <div className="text-[10px] text-stone-500 font-mono">{formattedTime}</div>
                         </td>
 
                         {/* Channel */}
@@ -565,7 +974,10 @@ const BillHistory = () => {
 
                         {/* Items */}
                         <td className="py-3.5 px-4">
-                          <div className="text-stone-700 font-medium line-clamp-1 max-w-[220px]" title={bill.items?.map(i => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} (x${i.quantity}${i.serviceType === 'PARCEL' ? ', Parcel' : ''})`).join(', ')}>
+                          <div
+                            className="text-stone-700 font-medium line-clamp-1 max-w-[220px]"
+                            title={bill.items?.map(i => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} (x${i.quantity}${i.serviceType === 'PARCEL' ? ', Parcel' : ''})`).join(', ')}
+                          >
                             {bill.items?.map((item, idx) => (
                               <span key={idx}>
                                 {item.name}{item.variantLabel ? ` (${item.variantLabel})` : ''} ×{item.quantity}{item.serviceType === 'PARCEL' ? ' [P]' : ''}{idx < bill.items.length - 1 ? ', ' : ''}
@@ -732,7 +1144,7 @@ const BillHistory = () => {
                 <span>Last Safe Cleanup:</span>
                 <span className="font-bold text-stone-900">
                   {retentionSettings.lastCleanupAt
-                    ? new Date(retentionSettings.lastCleanupAt).toLocaleString('en-IN')
+                    ? new Date(retentionSettings.lastCleanupAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
                     : 'Never run'}
                 </span>
               </div>
@@ -752,7 +1164,7 @@ const BillHistory = () => {
                   <span>Cleanup Preview Results</span>
                 </div>
                 <p className="text-amber-800">
-                  Cutoff date: <strong>{new Date(cleanupPreview.cutoffDate).toLocaleDateString()}</strong> (older than {cleanupPreview.retentionMonths} months).
+                  Cutoff date: <strong>{new Date(cleanupPreview.cutoffDate).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}</strong> (older than {cleanupPreview.retentionMonths} months).
                 </p>
                 <p className="text-amber-900 font-black text-sm">
                   Found {cleanupPreview.eligibleCount} expired completed bills eligible for purge.
@@ -812,4 +1224,3 @@ const BillHistory = () => {
 };
 
 export default BillHistory;
-

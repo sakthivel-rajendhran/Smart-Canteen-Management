@@ -50,6 +50,14 @@ export const createWalkInOrder = async (req, res) => {
       discount = 0,
     } = req.body;
 
+    const normalizedPaymentMethod = String(paymentMethod || 'cash').toLowerCase();
+    if (normalizedPaymentMethod !== 'cash') {
+      return res.status(400).json({
+        success: false,
+        message: 'POS Counter orders strictly support cash payment only.',
+      });
+    }
+
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, message: 'Please add at least one food item.' });
     }
@@ -454,42 +462,73 @@ export const getBillArchive = async (req, res) => {
       query.paymentMethod = paymentMethod.toLowerCase();
     }
 
-    // 4. Date Range Filtering based on completion/creation
-    const now = new Date();
+    // 4. Date Range Filtering strictly in Asia/Kolkata (IST: UTC+05:30)
+    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    const [y, m, d] = todayStr.split('-').map(Number);
     let rangeStart = null;
     let rangeEnd = null;
+    let filterLabel = 'Today';
 
     if (dateRange === 'today') {
-      rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-      rangeEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      filterLabel = 'Today';
+      rangeStart = new Date(`${todayStr}T00:00:00.000+05:30`);
+      rangeEnd = new Date(`${todayStr}T23:59:59.999+05:30`);
     } else if (dateRange === 'yesterday') {
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      rangeStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0, 0);
-      rangeEnd = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
+      filterLabel = 'Yesterday';
+      const prev = new Date(Date.UTC(y, m - 1, d - 1));
+      const yestStr = prev.toISOString().slice(0, 10);
+      rangeStart = new Date(`${yestStr}T00:00:00.000+05:30`);
+      rangeEnd = new Date(`${yestStr}T23:59:59.999+05:30`);
     } else if (dateRange === '7days') {
-      rangeStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      filterLabel = 'Last 7 Days';
+      const prev = new Date(Date.UTC(y, m - 1, d - 6));
+      const sStr = prev.toISOString().slice(0, 10);
+      rangeStart = new Date(`${sStr}T00:00:00.000+05:30`);
+      rangeEnd = new Date(`${todayStr}T23:59:59.999+05:30`);
     } else if (dateRange === '30days') {
-      rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      filterLabel = 'Last 30 Days';
+      const prev = new Date(Date.UTC(y, m - 1, d - 29));
+      const sStr = prev.toISOString().slice(0, 10);
+      rangeStart = new Date(`${sStr}T00:00:00.000+05:30`);
+      rangeEnd = new Date(`${todayStr}T23:59:59.999+05:30`);
     } else if (dateRange === '3months') {
-      rangeStart = new Date(now);
-      rangeStart.setMonth(rangeStart.getMonth() - 3);
+      filterLabel = '3 Months';
+      const prev = new Date(Date.UTC(y, m - 1 - 3, d));
+      const sStr = prev.toISOString().slice(0, 10);
+      rangeStart = new Date(`${sStr}T00:00:00.000+05:30`);
+      rangeEnd = new Date(`${todayStr}T23:59:59.999+05:30`);
     } else if (dateRange === '6months') {
-      rangeStart = new Date(now);
-      rangeStart.setMonth(rangeStart.getMonth() - 6);
-    } else if (dateRange === 'custom' && (startDate || endDate)) {
-      if (startDate) rangeStart = new Date(startDate);
-      if (endDate) {
-        rangeEnd = new Date(endDate);
-        rangeEnd.setHours(23, 59, 59, 999);
+      filterLabel = '6 Months';
+      const prev = new Date(Date.UTC(y, m - 1 - 6, d));
+      const sStr = prev.toISOString().slice(0, 10);
+      rangeStart = new Date(`${sStr}T00:00:00.000+05:30`);
+      rangeEnd = new Date(`${todayStr}T23:59:59.999+05:30`);
+    } else if (dateRange === 'custom') {
+      filterLabel = 'Custom Range';
+      let safeStart = startDate;
+      let safeEnd = endDate;
+
+      // Cap future dates to today in IST
+      if (safeStart && safeStart > todayStr) safeStart = todayStr;
+      if (safeEnd && safeEnd > todayStr) safeEnd = todayStr;
+
+      // Ensure end date is not earlier than start date
+      if (safeStart && safeEnd && safeEnd < safeStart) {
+        safeEnd = safeStart;
       }
+
+      if (safeStart) rangeStart = new Date(`${safeStart}T00:00:00.000+05:30`);
+      if (safeEnd) rangeEnd = new Date(`${safeEnd}T23:59:59.999+05:30`);
     }
 
     if (rangeStart || rangeEnd) {
-      const dateField = status === 'Completed' ? 'completedAt' : 'createdAt';
-      query[dateField] = {};
-      if (rangeStart) query[dateField].$gte = rangeStart;
-      if (rangeEnd) query[dateField].$lte = rangeEnd;
+      const dateCond = {};
+      if (rangeStart) dateCond.$gte = rangeStart;
+      if (rangeEnd) dateCond.$lte = rangeEnd;
+      query.$or = [
+        { completedAt: dateCond },
+        { completedAt: null, createdAt: dateCond },
+      ];
     }
 
     // 5. Search Filter across Token, OrderCode, Customer, Phone
@@ -507,12 +546,13 @@ export const getBillArchive = async (req, res) => {
       ];
     }
 
+    const isExportAll = req.query.exportAll === 'true';
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
-    const skip = (pageNum - 1) * limitNum;
+    const limitNum = isExportAll ? 1000 : Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = isExportAll ? 0 : (pageNum - 1) * limitNum;
 
     // 6. Execute Queries & Aggregation in Parallel
-    const [orders, totalCount, summaryAgg] = await Promise.all([
+    const [orders, totalCount, summaryAgg, dailyTrends] = await Promise.all([
       Order.find(query)
         .populate('user', 'name email phone studentDetails staffDetails')
         .populate('cashier', 'name')
@@ -547,6 +587,29 @@ export const getBillArchive = async (req, res) => {
           },
         },
       ]),
+      Order.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: { $ifNull: ['$completedAt', '$createdAt'] },
+                timezone: '+05:30',
+              },
+            },
+            revenue: { $sum: '$total' },
+            orders: { $sum: 1 },
+            cash: {
+              $sum: { $cond: [{ $in: ['$paymentMethod', ['cash', 'cod']] }, '$total', 0] },
+            },
+            digital: {
+              $sum: { $cond: [{ $in: ['$paymentMethod', ['razorpay', 'upi', 'card']] }, '$total', 0] },
+            },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
     ]);
 
     const summary = summaryAgg[0] || {
@@ -561,7 +624,16 @@ export const getBillArchive = async (req, res) => {
     res.json({
       success: true,
       summary,
+      dailyTrends,
       data: orders,
+      filterInfo: {
+        dateRange,
+        filterLabel,
+        todayStr,
+        startDate: rangeStart ? rangeStart.toISOString() : null,
+        endDate: rangeEnd ? rangeEnd.toISOString() : null,
+        generatedAt: new Date().toISOString(),
+      },
       pagination: {
         page: pageNum,
         limit: limitNum,

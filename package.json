@@ -15,5 +15,9 @@
   "dependencies": {},
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "esbuild@0.21.5": true
   }
 }
