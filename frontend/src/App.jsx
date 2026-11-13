@@ -39,6 +39,7 @@ const LiveTracking = lazy(() => import('./admin/LiveTracking'));
 const POSBilling = lazy(() => import('./admin/POSBilling'));
 const FoodHandover = lazy(() => import('./admin/FoodHandover'));
 const BillHistory = lazy(() => import('./admin/BillHistory'));
+const RevenueReports = lazy(() => import('./admin/RevenueReports'));
 const MenuManagement = lazy(() => import('./admin/MenuManagement'));
 const Categories = lazy(() => import('./admin/Categories'));
 const Coupons = lazy(() => import('./admin/Coupons'));
@@ -134,19 +135,24 @@ function App() {
                           <FoodHandover />
                         </AdminRoute>
                       } />
+                      <Route path="/admin/revenue-reports" element={
+                        <AdminRoute>
+                          <RevenueReports />
+                        </AdminRoute>
+                      } />
                       <Route path="/admin/bills" element={
                         <AdminRoute>
-                          <BillHistory />
+                          <RevenueReports />
                         </AdminRoute>
                       } />
                       <Route path="/admin/revenue" element={
                         <AdminRoute>
-                          <BillHistory />
+                          <RevenueReports />
                         </AdminRoute>
                       } />
                       <Route path="/admin/reports" element={
                         <AdminRoute>
-                          <BillHistory />
+                          <RevenueReports />
                         </AdminRoute>
                       } />
                       <Route path="/admin/menu" element={

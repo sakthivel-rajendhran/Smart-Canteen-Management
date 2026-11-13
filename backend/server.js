@@ -23,6 +23,7 @@ import paymentRoutes from './routes/paymentRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import posRoutes from './routes/posRoutes.js';
+import revenueReportRoutes from './routes/revenueReportRoutes.js';
 
 // Error Handler Middleware
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
@@ -127,6 +128,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', posRoutes);
+app.use('/api/admin/revenue', revenueReportRoutes);
 
 // Health check API
 app.get('/', (req, res) => {

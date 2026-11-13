@@ -183,7 +183,7 @@ const Dashboard = () => {
             { label: 'POS Billing', path: '/admin/pos', icon: <Zap className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
             { label: 'Live Queue', path: '/admin/live-tracking', icon: <Layers className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
             { label: 'Handover', path: '/admin/handover', icon: <CheckCheck className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
-            { label: 'Revenue Report', path: '/admin/bills', icon: <Receipt className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
+            { label: 'Revenue Reports', path: '/admin/revenue-reports', icon: <Receipt className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
             { label: 'Menu List', path: '/admin/menu', icon: <Utensils className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' },
             { label: 'Coupons', path: '/admin/coupons', icon: <Percent className="w-4.5 h-4.5" />, color: 'bg-white/10 hover:bg-white/20' }
           ].map((action, idx) => (
