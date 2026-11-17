@@ -331,7 +331,7 @@ const FoodHandover = () => {
                 <Search className="w-5 h-5 text-stone-400 absolute left-4 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Enter Token # (e.g. 1025) or Order ID (DRS-1025)..."
+                  placeholder="Enter Token # (e.g. K7P2) or scan QR..."
                   value={quickVerifyInput}
                   onChange={(e) => setQuickVerifyInput(e.target.value)}
                   className="w-full pl-12 pr-4 py-3.5 bg-stone-50 border-2 border-stone-200 rounded-2xl text-sm sm:text-base font-bold font-mono tracking-wider focus:outline-none focus:border-[#0b3d2e] focus:bg-white transition"
@@ -562,7 +562,7 @@ const FoodHandover = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {orders.map((order) => {
                 const isWalkIn = order.orderType === 'WALK_IN';
-                const token = order.pickupToken || order.orderCode?.replace('DRS-', '');
+                const token = order.orderCode || order.pickupToken;
                 
                 // Customer identification
                 const customerName = isWalkIn
@@ -860,7 +860,7 @@ const FoodHandover = () => {
                 CUSTOMER PICKUP TOKEN
               </span>
               <span className="font-outfit font-black text-4xl tracking-tight text-white">
-                #{confirmModal.order.pickupToken || confirmModal.order.orderCode?.replace('DRS-', '')}
+                #{confirmModal.order.orderCode || confirmModal.order.pickupToken}
               </span>
               <div className="text-xs text-white/80 font-semibold">
                 {confirmModal.order.orderType === 'WALK_IN'

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 const Tracker = () => {
-  const { id } = useParams(); // orderCode (e.g. DRS-1058)
+  const { id } = useParams(); // order _id or token
 
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -177,9 +177,14 @@ const Tracker = () => {
         <div className="absolute w-60 h-60 bg-radial-gradient(circle, rgba(255,_255,_255,_.03)_0%,_transparent_70%) top-[-30px] right-[-30px] pointer-events-none"></div>
         <div className="flex flex-wrap justify-between items-start gap-4">
           <div>
-            <span className="text-[10px] text-white/50 tracking-wider uppercase block">Order Code</span>
-            <span className="font-mono font-black text-amber text-2xl tracking-widest">{order.orderCode}</span>
-            <span className="text-xs text-white/60 block mt-1">Ordered by {order.user?.name || 'Student'}</span>
+            <span className="text-[10px] text-white/50 tracking-wider uppercase block">Pickup Token</span>
+            <span className="font-mono font-black text-amber text-3xl sm:text-4xl tracking-widest block">
+              #{order.orderCode}
+            </span>
+            <span className="text-xs text-amber-200/95 font-semibold block mt-1">
+              💡 Show this token at the counter
+            </span>
+            <span className="text-xs text-white/60 block mt-0.5">Ordered by {order.user?.name || 'Student'}</span>
           </div>
           <div className="text-right">
             <span className="text-[10px] text-white/50 tracking-wider uppercase block">Placed At</span>
@@ -425,7 +430,7 @@ const Tracker = () => {
           <span>View Pickup Token</span>
         </Link>
         <Link 
-          to={`/bill/${order.orderCode}`}
+          to={`/bill/${order._id || order.orderCode}`}
           className="flex-1 bg-primary-dark hover:bg-primary text-white font-bold py-3.5 rounded-2xl transition-all shadow-md shadow-primary/20 text-center flex items-center justify-center gap-2"
         >
           <Receipt className="w-4 h-4" />

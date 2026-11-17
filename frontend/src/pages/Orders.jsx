@@ -119,12 +119,11 @@ const Orders = () => {
               {/* Card Header */}
               <div className="bg-primary-darker/90 px-6 py-4 flex flex-wrap items-center justify-between gap-4 text-white">
                 <div>
-                  <span className="text-[10px] text-white/50 tracking-wider uppercase block">Pickup Token / Order</span>
+                  <span className="text-[10px] text-white/50 tracking-wider uppercase block">Pickup Token</span>
                   <div className="flex items-baseline gap-2">
-                    <span className="font-outfit font-black text-amber text-lg">
-                      {order.pickupToken ? (String(order.pickupToken).startsWith('DRS-') ? order.pickupToken : `DRS-${order.pickupToken}`) : order.orderCode}
+                    <span className="font-outfit font-black text-amber text-2xl tracking-wider">
+                      #{order.orderCode}
                     </span>
-                    <span className="text-xs text-white/50 font-mono">({order.orderCode})</span>
                   </div>
                 </div>
                 <div className="text-right">
@@ -223,7 +222,7 @@ const Orders = () => {
                   </Link>
                   {isOrderActive(order.status) && (
                     <Link
-                      to={`/tracker/${order.orderCode}`}
+                      to={`/tracker/${order._id || order.orderCode}`}
                       className="flex-1 min-w-[130px] bg-primary-dark hover:bg-primary text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5"
                     >
                       <MapPin className="w-3.5 h-3.5" />
@@ -231,7 +230,7 @@ const Orders = () => {
                     </Link>
                   )}
                   <Link
-                    to={`/bill/${order.orderCode}`}
+                    to={`/bill/${order._id || order.orderCode}`}
                     className="flex-1 min-w-[110px] bg-white border border-border hover:border-primary-dark text-primary-dark text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-1.5"
                   >
                     <Receipt className="w-3.5 h-3.5" />

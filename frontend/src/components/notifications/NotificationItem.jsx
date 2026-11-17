@@ -59,8 +59,9 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
         navigate(adminLink);
       }
     } else {
+      const targetId = notification.metadata?.orderId || notification.order?._id || notification.order;
       const customerLink =
-        notification.metadata?.link || (orderCode ? `/tracker/${orderCode}` : '/pickup');
+        notification.metadata?.link || (targetId ? `/tracker/${targetId}` : (orderCode ? `/tracker/${orderCode}` : '/pickup'));
       if (customerLink) {
         navigate(customerLink);
       }
@@ -158,15 +159,13 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
         <div className="flex flex-wrap items-center justify-between gap-1.5 mt-2 pt-1.5 border-t border-gray-100/80 min-w-0">
           {orderCode ? (
             <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
-              <span className="inline-flex items-center gap-0.5 text-[11px] font-bold text-primary hover:text-primary-dark truncate max-w-full">
-                <span className="truncate">Pickup / Track #{orderCode}</span>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-primary hover:text-primary-dark truncate max-w-full">
+                <span className="truncate">Pickup / Track</span>
+                <span className="font-mono font-black text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded text-xs shrink-0">
+                  #{orderCode}
+                </span>
                 <ArrowUpRight className="w-3 h-3 shrink-0" />
               </span>
-              {pickupToken && (
-                <span className="text-[10px] font-mono font-bold text-amber-900 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded leading-none whitespace-nowrap shrink-0">
-                  Token #{pickupToken}
-                </span>
-              )}
             </div>
           ) : (
             <span />

@@ -17,25 +17,18 @@ import {
   createAndEmitAdminNotification,
 } from '../utils/notificationHelper.js';
 
-// Safe query helper by code, token, or Mongo ID
+// Safe query helper: uses _id when valid ObjectId, or exact uppercase token on active/completed orders (no regex)
 const buildSafeOrderQuery = (rawQuery) => {
   if (!rawQuery) return null;
   const term = String(rawQuery).trim();
-  const withoutPrefix = term.replace(/^DRS-/i, '');
-  const withPrefix = term.toUpperCase().startsWith('DRS-') ? term : `DRS-${term}`;
-
-  const conditions = [
-    { orderCode: { $regex: new RegExp(`^${term}$`, 'i') } },
-    { orderCode: { $regex: new RegExp(`^${withPrefix}$`, 'i') } },
-    { pickupToken: { $regex: new RegExp(`^${term}$`, 'i') } },
-    { pickupToken: { $regex: new RegExp(`^${withPrefix}$`, 'i') } },
-    { pickupToken: { $regex: new RegExp(`^${withoutPrefix}$`, 'i') } },
-    { pickupSecret: term },
-  ];
   if (mongoose.Types.ObjectId.isValid(term)) {
-    conditions.unshift({ _id: term });
+    return { _id: term };
   }
-  return { $or: conditions };
+
+  const token = term.replace(/^#/, '').toUpperCase();
+  return {
+    $or: [{ orderCode: token }, { pickupToken: token }, { pickupSecret: term }],
+  };
 };
 
 // @desc    Create Direct Walk-in Counter Order (POS Billing)
@@ -158,9 +151,9 @@ export const createWalkInOrder = async (req, res) => {
     const discountAmount = Math.max(0, Math.min(subtotal + parcelChargeTotal, Number(discount) || 0));
     const grandTotal = Math.max(0, Number((subtotal + parcelChargeTotal - discountAmount).toFixed(2)));
 
-    // 2. Generate unique order code & consistent pickup token
+    // 2. Generate unique order code & 4-character pickup token
     const orderCode = await generateOrderCode();
-    const pickupToken = orderCode; // Consistent DRS-XXXX format
+    const pickupToken = orderCode;
     const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
 
     // 3. Create WALK_IN Order document directly in Completed state (counter sale finalized at POS)
@@ -207,8 +200,9 @@ export const createWalkInOrder = async (req, res) => {
         priority: 'NORMAL',
         orderId: order._id,
         orderCode: order.orderCode,
-        eventId: `ORDER_ADMIN_${order.orderCode}_COMPLETED`,
+        eventId: `ORDER_ADMIN_${order._id || order.orderCode}_COMPLETED`,
         metadata: {
+          orderId: order._id,
           orderCode: order.orderCode,
           pickupToken: order.pickupToken,
           total: order.total,
@@ -253,6 +247,7 @@ export const getHandoverOrders = async (req, res) => {
     if (search && search.trim()) {
       const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const searchRegex = new RegExp(safeSearch, 'i');
+      const cleanToken = search.trim().replace(/^#/, '').toUpperCase();
 
       // Match online registered users by name, phone, registerNumber, staffId
       const matchingUsers = await User.find({
@@ -266,9 +261,10 @@ export const getHandoverOrders = async (req, res) => {
       }).select('_id').lean();
       const userIds = matchingUsers.map((u) => u._id);
 
+      // Exact case-insensitive match on 4-char token; customer name & phone as regex
       query.$or = [
-        { orderCode: searchRegex },
-        { pickupToken: searchRegex },
+        { orderCode: cleanToken },
+        { pickupToken: cleanToken },
         { 'walkInCustomer.name': searchRegex },
         { 'walkInCustomer.phone': searchRegex },
         { 'walkInCustomer.registerNumber': searchRegex },
@@ -529,10 +525,11 @@ export const getBillArchive = async (req, res) => {
     if (search && search.trim()) {
       const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const searchRegex = new RegExp(safeSearch, 'i');
+      const cleanToken = search.trim().replace(/^#/, '').toUpperCase();
 
       query.$or = [
-        { orderCode: searchRegex },
-        { pickupToken: searchRegex },
+        { orderCode: cleanToken },
+        { pickupToken: cleanToken },
         { 'walkInCustomer.name': searchRegex },
         { 'walkInCustomer.phone': searchRegex },
         { 'walkInCustomer.registerNumber': searchRegex },

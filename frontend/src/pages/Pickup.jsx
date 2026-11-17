@@ -258,10 +258,7 @@ const Pickup = () => {
         ) : (
           <div className="space-y-4">
             {filteredOrders.map((order) => {
-              const token = order.pickupToken || order.orderCode;
-              const formattedToken = String(token).toUpperCase().startsWith('DRS-')
-                ? String(token).toUpperCase()
-                : `DRS-${token}`;
+              const formattedToken = order.orderCode || order.pickupToken;
 
               const isReady = order.status === 'Ready';
               const isPickupBill = order.status === 'Pickup Bill';
@@ -346,7 +343,7 @@ const Pickup = () => {
                                 : 'text-3xl sm:text-4xl text-stone-800'
                             }`}
                           >
-                            {formattedToken}
+                            #{formattedToken}
                           </div>
                         </div>
 
@@ -450,7 +447,7 @@ const Pickup = () => {
                     <div className="flex flex-col justify-center gap-2.5 w-full md:w-56 shrink-0 border-t md:border-t-0 md:border-l border-stone-200 md:pl-6 pt-4 md:pt-0">
                       
                       <Link
-                        to={`/bill/${order.orderCode}`}
+                        to={`/bill/${order._id || order.orderCode}`}
                         className="w-full flex items-center justify-center gap-2 bg-[#0b3d2e] hover:bg-[#1a7a45] text-white font-bold text-xs py-3 px-4 rounded-xl shadow-md transition active:scale-95"
                       >
                         <Receipt className="w-4 h-4 text-amber" />
@@ -458,7 +455,7 @@ const Pickup = () => {
                       </Link>
 
                       <Link
-                        to={`/tracker/${order.orderCode}`}
+                        to={`/tracker/${order._id || order.orderCode}`}
                         className="w-full flex items-center justify-center gap-2 bg-white hover:bg-stone-100 text-stone-700 font-bold text-xs py-2.5 px-4 rounded-xl border border-stone-200 transition"
                       >
                         <MapPin className="w-4 h-4 text-[#0b3d2e]" />

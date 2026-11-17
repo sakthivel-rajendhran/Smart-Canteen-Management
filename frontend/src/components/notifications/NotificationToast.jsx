@@ -24,8 +24,8 @@ const NotificationToast = () => {
         const handleAction = () => {
           dismissToast(toast.id);
           // For admin: do not redirect to tracker
-          if (!isAdmin && toast.orderCode) {
-            navigate(`/tracker/${toast.orderCode}`);
+          if (!isAdmin && (toast.orderId || toast.orderCode)) {
+            navigate(`/tracker/${toast.orderId || toast.orderCode}`);
           }
         };
 

@@ -84,10 +84,10 @@ const verifyPayment = async (req, res) => {
 
     const cleanCode = String(orderCode).trim();
     const query = mongoose.Types.ObjectId.isValid(cleanCode)
-      ? { $or: [{ orderCode: cleanCode }, { _id: cleanCode }] }
-      : { orderCode: { $regex: new RegExp(`^${cleanCode}$`, 'i') } };
+      ? { _id: cleanCode }
+      : { orderCode: cleanCode.replace(/^#/, '').toUpperCase() };
 
-    const order = await Order.findOne(query);
+    const order = await Order.findOne(query).sort({ createdAt: -1 });
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }

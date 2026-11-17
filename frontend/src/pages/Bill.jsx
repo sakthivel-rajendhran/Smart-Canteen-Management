@@ -176,7 +176,7 @@ const Bill = () => {
                 POS Thermal Receipt
               </h1>
               <p className="text-[11px] text-stone-500 font-medium">
-                Order #{order.orderCode} • {order.items?.length || 0} item(s)
+                Token #{order.orderCode} • {order.items?.length || 0} item(s)
               </p>
             </div>
           </div>
@@ -261,8 +261,8 @@ const Bill = () => {
           {/* ================= ORDER METADATA ================= */}
           <div className="thermal-avoid-break text-[11px] space-y-1 pb-2">
             <div className="flex justify-between items-baseline">
-              <span className="font-bold">TOKEN / ORDER:</span>
-              <span className={`font-black tracking-wider ${is58mm ? 'text-[14px]' : 'text-[16px]'}`}>
+              <span className="font-bold">PICKUP TOKEN:</span>
+              <span className={`font-black tracking-wider ${is58mm ? 'text-[18px]' : 'text-[22px]'}`}>
                 #{order.orderCode}
               </span>
             </div>
@@ -451,7 +451,7 @@ const Bill = () => {
         {/* Screen Action Links (Hidden on Print) */}
         <div className="no-print mt-6 flex items-center justify-center gap-3">
           <Link
-            to={`/tracker/${order.orderCode}`}
+            to={`/tracker/${order._id || order.orderCode}`}
             className="inline-flex items-center gap-1.5 bg-white border border-stone-300 hover:border-[#0b3d2e] text-[#0b3d2e] font-bold text-xs py-2 px-4 rounded-xl shadow-xs transition"
           >
             <span>📍 Live Status</span>

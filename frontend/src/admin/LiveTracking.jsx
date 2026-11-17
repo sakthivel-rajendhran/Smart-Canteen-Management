@@ -280,18 +280,19 @@ const LiveTracking = () => {
     }
   };
 
-  const handleUpdateStatus = async (orderCode, newStatus) => {
-    setActionLoadingId(orderCode);
+  const handleUpdateStatus = async (orderId, newStatus, displayCode) => {
+    setActionLoadingId(orderId);
     try {
-      const res = await API.patch(`/orders/${orderCode}/status`, { status: newStatus });
+      const res = await API.patch(`/orders/${orderId}/status`, { status: newStatus });
       if (res.data?.success) {
         setOrders((prev) =>
-          prev.map((o) => (o.orderCode === orderCode ? { ...o, status: newStatus } : o))
+          prev.map((o) => (o._id === orderId || o.orderCode === orderId ? { ...o, status: newStatus } : o))
         );
+        const codeLabel = displayCode || orderId;
         if (newStatus === 'Pickup Bill') {
-          showToast(`✓ Order #${orderCode} moved to Pickup Bill (Available in Handover Queue)`);
+          showToast(`✓ Order #${codeLabel} moved to Pickup Bill (Available in Handover Queue)`);
         } else {
-          showToast(`✓ Order #${orderCode} moved to ${newStatus}`);
+          showToast(`✓ Order #${codeLabel} moved to ${newStatus}`);
         }
       }
     } catch (err) {
@@ -301,16 +302,17 @@ const LiveTracking = () => {
     }
   };
 
-  const handleCancelOrder = async (orderCode) => {
-    if (!confirm(`Are you sure you want to cancel order ${orderCode}?`)) return;
-    setActionLoadingId(orderCode);
+  const handleCancelOrder = async (orderId, displayCode) => {
+    const codeLabel = displayCode || orderId;
+    if (!confirm(`Are you sure you want to cancel order #${codeLabel}?`)) return;
+    setActionLoadingId(orderId);
     try {
-      const res = await API.patch(`/orders/${orderCode}/cancel`);
+      const res = await API.patch(`/orders/${orderId}/cancel`);
       if (res.data?.success) {
         setOrders((prev) =>
-          prev.map((o) => (o.orderCode === orderCode ? { ...o, status: 'Cancelled' } : o))
+          prev.map((o) => (o._id === orderId || o.orderCode === orderId ? { ...o, status: 'Cancelled' } : o))
         );
-        showToast(`✓ Order ${orderCode} was cancelled.`);
+        showToast(`✓ Order #${codeLabel} was cancelled.`);
       }
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to cancel order');
@@ -521,7 +523,7 @@ const LiveTracking = () => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by code (e.g. DRS-3420), customer, email..."
+            placeholder="Search by token (e.g. K7P2), customer, email..."
             className="w-full bg-cream border border-border focus:border-primary rounded-xl py-2.5 pl-10 pr-8 text-xs focus:outline-none transition-all"
           />
           {searchQuery && (
@@ -655,11 +657,8 @@ const LiveTracking = () => {
                 {/* Card Top Header */}
                 <div className="bg-primary-darker px-5 py-3.5 text-white flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-amber text-base tracking-wider">
+                    <span className="font-mono font-black text-amber text-xl tracking-wider">
                       #{order.orderCode}
-                    </span>
-                    <span className="bg-amber/20 border border-amber/40 text-amber text-[10px] font-black uppercase px-2 py-0.5 rounded-md">
-                      TOKEN: {order.pickupToken ? (String(order.pickupToken).startsWith('DRS-') ? order.pickupToken : `DRS-${order.pickupToken}`) : order.orderCode}
                     </span>
                     <span className="w-1.5 h-1.5 rounded-full bg-amber animate-ping" />
                   </div>
@@ -783,7 +782,7 @@ const LiveTracking = () => {
                   <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
                     {nextStage ? (
                       <button
-                        onClick={() => handleUpdateStatus(order.orderCode, nextStage.stage)}
+                        onClick={() => handleUpdateStatus(order._id || order.orderCode, nextStage.stage, order.orderCode)}
                         disabled={isProcessing}
                         className={`w-full text-white font-bold text-xs py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 active:scale-98 disabled:opacity-50 ${nextStage.color}`}
                       >
@@ -807,7 +806,7 @@ const LiveTracking = () => {
 
                       <div className="flex items-center gap-2">
                         <Link
-                          to={`/bill/${order.orderCode}`}
+                          to={`/bill/${order._id || order.orderCode}`}
                           target="_blank"
                           className="text-muted hover:text-primary-dark font-bold text-[11px] flex items-center gap-0.5"
                         >
@@ -816,7 +815,7 @@ const LiveTracking = () => {
 
                         {order.status !== 'Completed' && order.status !== 'Cancelled' && (
                           <button
-                            onClick={() => handleCancelOrder(order.orderCode)}
+                            onClick={() => handleCancelOrder(order._id || order.orderCode, order.orderCode)}
                             className="text-red-500 hover:text-red-700 font-bold text-[11px]"
                             title="Cancel this order"
                           >
@@ -1033,7 +1032,7 @@ const LiveTracking = () => {
                   {STATUS_PIPELINE.map((s) => (
                     <button
                       key={s}
-                      onClick={() => handleUpdateStatus(selectedOrder.orderCode, s)}
+                      onClick={() => handleUpdateStatus(selectedOrder._id || selectedOrder.orderCode, s, selectedOrder.orderCode)}
                       disabled={selectedOrder.status === s}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                         selectedOrder.status === s
@@ -1051,7 +1050,7 @@ const LiveTracking = () => {
             {/* Modal Footer */}
             <div className="p-4 bg-gray-50 border-t border-border flex items-center justify-between">
               <Link
-                to={`/bill/${selectedOrder.orderCode}`}
+                to={`/bill/${selectedOrder._id || selectedOrder.orderCode}`}
                 target="_blank"
                 className="bg-amber hover:bg-amber-dark text-primary-darker font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-sm flex items-center gap-1.5"
               >

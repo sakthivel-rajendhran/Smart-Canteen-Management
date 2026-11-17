@@ -368,7 +368,7 @@ const PickupDisplay = () => {
                         PICKUP TOKEN
                       </span>
                       <div className="font-outfit font-black text-3xl sm:text-4xl md:text-5xl text-amber tracking-tight drop-shadow-[0_2px_12px_rgba(245,158,11,0.35)]">
-                        {token}
+                        {token?.startsWith('#') ? token : `#${token}`}
                       </div>
                     </div>
 

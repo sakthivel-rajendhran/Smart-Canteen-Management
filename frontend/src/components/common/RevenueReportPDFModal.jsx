@@ -519,7 +519,7 @@ const RevenueReportPDFModal = ({
                     <tbody className="divide-y divide-stone-100">
                       {bills.map((b) => {
                         const isWalkIn = b.orderType === 'WALK_IN';
-                        const token = b.pickupToken || b.orderCode?.replace('DRS-', '');
+                        const token = b.orderCode || b.pickupToken || '—';
                         const customer = isWalkIn
                           ? (b.walkInCustomer?.name || 'Walk-in')
                           : (b.user?.name || 'Student');
@@ -529,7 +529,6 @@ const RevenueReportPDFModal = ({
                           <tr key={b._id} className="hover:bg-stone-50/70">
                             <td className="py-2 px-2.5 font-mono">
                               <span className="font-bold text-[#0b3d2e] block">#{token}</span>
-                              <span className="text-[9px] text-stone-400 font-normal">#{b.orderCode}</span>
                             </td>
                             <td className="py-2 px-2.5 font-mono text-stone-600 whitespace-nowrap">
                               {timeStr}

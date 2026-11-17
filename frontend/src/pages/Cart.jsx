@@ -51,6 +51,7 @@ const Cart = () => {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const [successOrderCode, setSuccessOrderCode] = useState('');
+  const [successOrderId, setSuccessOrderId] = useState('');
 
   useEffect(() => {
     refreshCouponSettings();
@@ -119,6 +120,7 @@ const Cart = () => {
       // 3. Handle Cash vs. Online Checkout
       if (paymentMethod === 'cod') {
         checkoutRequestIdRef.current = null;
+        setSuccessOrderId(createdOrder._id);
         setSuccessOrderCode(createdOrder.orderCode);
         clearCart();
       } else {
@@ -167,6 +169,7 @@ const Cart = () => {
 
             if (verifyRes.data?.success) {
               checkoutRequestIdRef.current = null;
+              setSuccessOrderId(order._id);
               setSuccessOrderCode(order.orderCode);
               clearCart();
             } else {
@@ -464,25 +467,27 @@ const Cart = () => {
           <div className="bg-white border border-border w-full max-w-md rounded-3xl p-8 text-center animate-[scalePop_0.35s_cubic-bezier(.34,_1.56,_.64,_1)] shadow-2xl">
             <span className="text-6xl block mb-4 animate-bounce">🎉</span>
             <h2 className="font-outfit font-black text-2xl text-primary-dark mb-2">Order Placed!</h2>
-            <p className="text-muted text-sm leading-relaxed mb-6">
-              Your canteen food is being freshly prepared.<br />Save this code to track your order:
+            <p className="text-muted text-sm leading-relaxed mb-4">
+              Your canteen food is being freshly prepared.
             </p>
             
             <div className="bg-primary-light border-2 border-dashed border-primary rounded-2xl p-5 mb-4">
-              <span className="text-[10px] text-primary font-black tracking-widest uppercase block mb-1">Your Order Code</span>
-              <span className="font-mono font-bold text-primary-darker text-3xl tracking-widest">{successOrderCode}</span>
+              <span className="text-[10px] text-primary font-black tracking-widest uppercase block mb-1">Your Pickup Token</span>
+              <span className="font-mono font-black text-primary-darker text-4xl tracking-widest block">#{successOrderCode}</span>
             </div>
 
-            <p className="text-[10px] text-muted mb-6">Admin can see your order live right now!</p>
+            <p className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200/80 rounded-xl py-2 px-3 mb-6">
+              💡 Show this token at the counter
+            </p>
 
             <button
-              onClick={() => navigate(`/tracker/${successOrderCode}`)}
+              onClick={() => navigate(`/tracker/${successOrderId || successOrderCode}`)}
               className="w-full bg-primary-dark hover:bg-primary text-white font-bold py-3.5 rounded-xl transition-all shadow-md shadow-primary/20 flex items-center justify-center gap-2 mb-3"
             >
               Track My Order →
             </button>
             <button
-              onClick={() => navigate(`/bill/${successOrderCode}`)}
+              onClick={() => navigate(`/bill/${successOrderId || successOrderCode}`)}
               className="text-xs text-muted hover:text-primary-dark font-bold py-2 focus:outline-none"
             >
               View Digital Bill

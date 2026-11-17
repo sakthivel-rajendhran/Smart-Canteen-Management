@@ -5,7 +5,6 @@ const orderSchema = new mongoose.Schema(
     orderCode: {
       type: String,
       required: true,
-      unique: true,
       index: true,
     },
     orderType: {
@@ -189,6 +188,8 @@ const orderSchema = new mongoose.Schema(
 );
 
 // Compound indexes for user orders, live feeds, archive queries, and date ranges
+orderSchema.index({ orderCode: 1, status: 1 });
+orderSchema.index({ pickupToken: 1, status: 1 });
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ user: 1, status: 1 });

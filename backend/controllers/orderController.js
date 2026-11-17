@@ -17,26 +17,20 @@ import {
   createAndEmitAdminNotification,
 } from '../utils/notificationHelper.js';
 
-// Helper to query orders safely by orderCode, pickupToken, or Mongo _id without CastError
+// Helper to query orders: uses _id when valid ObjectId, or exact uppercase token on active orders (no regex)
 const buildOrderQuery = (rawId) => {
   if (!rawId) return null;
   const id = String(rawId).trim();
-  const withoutPrefix = id.replace(/^DRS-/i, '');
-  const withPrefix = id.toUpperCase().startsWith('DRS-') ? id : `DRS-${id}`;
-
-  const conditions = [
-    { orderCode: { $regex: new RegExp(`^${id}$`, 'i') } },
-    { orderCode: { $regex: new RegExp(`^${withPrefix}$`, 'i') } },
-    { pickupToken: { $regex: new RegExp(`^${id}$`, 'i') } },
-    { pickupToken: { $regex: new RegExp(`^${withPrefix}$`, 'i') } },
-    { pickupToken: { $regex: new RegExp(`^${withoutPrefix}$`, 'i') } },
-  ];
-
   if (mongoose.Types.ObjectId.isValid(id)) {
-    conditions.unshift({ _id: id });
+    return { _id: id };
   }
 
-  return { $or: conditions };
+  // Exact match on uppercase token against active orders only
+  const token = id.replace(/^#/, '').toUpperCase();
+  return {
+    $or: [{ orderCode: token }, { pickupToken: token }],
+    status: { $in: ['Placed', 'Confirmed', 'Preparing', 'Ready'] },
+  };
 };
 
 // @desc    Create a new order
@@ -240,14 +234,14 @@ const createOrder = async (req, res) => {
 
     const total = Math.max(0, Number((subtotal + parcelChargeTotal - discount).toFixed(2)));
 
-    // 5. Order Creation with up to 5 retries on duplicate orderCode (no endless loops)
+    // 5. Order Creation with race safety & collision check against active orders
     let order = null;
     let attempts = 0;
     const maxAttempts = 5;
 
     while (attempts < maxAttempts) {
       attempts++;
-      const orderCode = generateOrderCode();
+      const orderCode = await generateOrderCode();
       const pickupToken = orderCode;
       const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
 
@@ -272,6 +266,33 @@ const createOrder = async (req, res) => {
           status: 'Placed',
           statusTimestamps: { Placed: new Date() },
         });
+
+        // 4. Race safety: if two orders get the same token at the same instant, re-check after insert
+        // If another ACTIVE order has the same token and an earlier createdAt, regenerate the token for newer order (max 3 times)
+        const ACTIVE_STATUSES = ['Placed', 'Confirmed', 'Preparing', 'Ready'];
+        let raceSafetyRetries = 0;
+        while (raceSafetyRetries < 3) {
+          const duplicateActive = await Order.findOne({
+            _id: { $ne: order._id },
+            orderCode: order.orderCode,
+            status: { $in: ACTIVE_STATUSES },
+            createdAt: { $lte: order.createdAt },
+          }).select('_id createdAt').lean();
+
+          if (!duplicateActive) {
+            break;
+          }
+
+          const newToken = await generateOrderCode();
+          order.orderCode = newToken;
+          order.pickupToken = newToken;
+          await Order.updateOne(
+            { _id: order._id },
+            { $set: { orderCode: newToken, pickupToken: newToken } }
+          );
+          raceSafetyRetries++;
+        }
+
         break; // Successfully created
       } catch (err) {
         if (err.code === 11000) {
@@ -289,14 +310,14 @@ const createOrder = async (req, res) => {
               });
             }
           }
-          // If collision was on orderCode, retry up to 5 attempts
+          // If collision occurred on unique constraint, retry
           if (attempts >= maxAttempts) {
             if (appliedCouponCode) {
               await Coupon.updateOne({ code: appliedCouponCode }, { $inc: { usedCount: -1 } });
             }
             return res.status(500).json({
               success: false,
-              message: 'Failed to generate a unique order code after 5 attempts. Please try again.',
+              message: 'Failed to generate a unique order code after multiple attempts. Please try again.',
             });
           }
           continue;
@@ -348,9 +369,11 @@ const createOrder = async (req, res) => {
           priority: 'HIGH',
           orderId: order._id,
           orderCode: order.orderCode,
-          eventId: `ORDER_ADMIN_${order.orderCode}_PLACED`,
+          eventId: `ORDER_ADMIN_${order._id || order.orderCode}_PLACED`,
           metadata: {
+            orderId: order._id,
             orderCode: order.orderCode,
+            pickupToken: order.pickupToken,
             total: order.total,
             itemsCount: order.items.length,
             customerName: req.user.name,
@@ -410,7 +433,9 @@ const getOrderById = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    const order = await Order.findOne(query).populate('user', 'name email phone role accountType studentDetails staffDetails');
+    const order = await Order.findOne(query)
+      .sort({ createdAt: -1 })
+      .populate('user', 'name email phone role accountType studentDetails staffDetails');
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
@@ -462,6 +487,15 @@ const updateOrderStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
+    // If looked up by token, resolve to latest active order _id to prevent ambiguity
+    let targetQuery = query;
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      const latestOrder = await Order.findOne(query).sort({ createdAt: -1 }).select('_id');
+      if (latestOrder) {
+        targetQuery = { _id: latestOrder._id };
+      }
+    }
+
     const now = new Date();
     const updateFields = {
       status,
@@ -481,7 +515,7 @@ const updateOrderStatus = async (req, res) => {
     // Atomic conditional update: only matches if current status is in valid predecessors
     const order = await Order.findOneAndUpdate(
       {
-        ...query,
+        ...targetQuery,
         status: { $in: validPredecessors },
       },
       { $set: updateFields },
@@ -580,9 +614,18 @@ const cancelOrder = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
+    // If looked up by token, resolve to latest active order _id
+    let targetQuery = query;
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      const latestOrder = await Order.findOne(query).sort({ createdAt: -1 }).select('_id');
+      if (latestOrder) {
+        targetQuery = { _id: latestOrder._id };
+      }
+    }
+
     // Verify ownership first if not admin
     if (req.user.role !== 'admin' && req.user.role !== 'ADMIN') {
-      const existing = await Order.findOne(query).select('user status orderCode coupon');
+      const existing = await Order.findOne(targetQuery).select('user status orderCode coupon');
       if (!existing) {
         return res.status(404).json({ success: false, message: 'Order not found' });
       }
@@ -598,7 +641,7 @@ const cancelOrder = async (req, res) => {
 
     const order = await Order.findOneAndUpdate(
       {
-        ...query,
+        ...targetQuery,
         status: { $in: cancellableStatuses },
       },
       {
@@ -744,17 +787,21 @@ const getActiveOrders = async (req, res) => {
 
     if (search && search.trim()) {
       const q = search.trim();
+      const cleanToken = q.replace(/^#/, '').toUpperCase();
       const matchedUsers = await User.find({
         $or: [
           { name: { $regex: q, $options: 'i' } },
           { email: { $regex: q, $options: 'i' } },
+          { phone: { $regex: q, $options: 'i' } },
         ],
       }).select('_id');
 
       const userIds = matchedUsers.map((u) => u._id);
 
+      // Exact case-insensitive match on 4-char token against active orders; name/phone as regex
       query.$or = [
-        { orderCode: { $regex: q, $options: 'i' } },
+        { orderCode: cleanToken },
+        { pickupToken: cleanToken },
         { user: { $in: userIds } },
       ];
     }
@@ -785,13 +832,9 @@ const getPublicReadyTokens = async (req, res) => {
 
     const data = readyOrders.map((o) => {
       const rawToken = o.pickupToken || o.orderCode;
-      const formattedToken = String(rawToken).toUpperCase().startsWith('DRS-')
-        ? String(rawToken).toUpperCase()
-        : `DRS-${rawToken}`;
-
       return {
         orderCode: o.orderCode,
-        pickupToken: formattedToken,
+        pickupToken: rawToken,
         orderType: o.orderType || 'ONLINE',
         readyAt: o.updatedAt || o.createdAt,
       };

@@ -1199,7 +1199,7 @@ const RevenueReports = () => {
               <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search Token, DRS-Code, Customer..."
+                placeholder="Search Token, Customer, Phone..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full pl-9 pr-16 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-medium focus:outline-none focus:border-[#0b3d2e] focus:bg-white transition"
@@ -1249,7 +1249,7 @@ const RevenueReports = () => {
                 <tbody className="divide-y divide-stone-100">
                   {transactions.map((t, idx) => {
                     const isWalkIn = t.orderType === 'WALK_IN';
-                    const token = t.pickupToken || t.orderCode?.replace('DRS-', '');
+                    const token = t.orderCode || t.pickupToken || '—';
                     const customerName = isWalkIn
                       ? (t.walkInCustomer?.name || 'Walk-in')
                       : (t.user?.name || 'Student');

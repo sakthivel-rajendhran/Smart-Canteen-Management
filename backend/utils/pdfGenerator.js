@@ -327,14 +327,14 @@ export const generateRevenueStatementPDF = async ({
           if (idx % 2 === 1) doc.rect(margin, currentY, contentWidth, 13).fill('#F8FAF9');
 
           const isWalkIn = tx.orderType === 'WALK_IN';
-          const token = tx.pickupToken || tx.orderCode?.replace('DRS-', '');
+          const token = tx.orderCode || tx.pickupToken || '—';
           const customer = isWalkIn
             ? (tx.walkInCustomer?.name || 'Walk-in')
             : (tx.user?.name || 'Student');
 
           const rowVals = [
             String(idx + 1),
-            `#${token} (${tx.orderCode || '—'})`,
+            `#${token}`,
             formatISTDate(tx.completedAt || tx.createdAt, true),
             isWalkIn ? 'Walk-in' : 'Online',
             customer,

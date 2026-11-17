@@ -5,7 +5,7 @@ const ThermalReceiptModal = ({ order, isOpen, onClose, autoPrint = false }) => {
   const [paperWidth, setPaperWidth] = useState('80mm'); // '80mm' | '58mm'
 
   const is58mm = paperWidth === '58mm';
-  const pickupToken = order?.pickupToken || String(order?.orderCode || '').replace('DRS-', '');
+  const pickupToken = order?.orderCode || order?.pickupToken || '';
 
   const handlePrint = () => {
     const receiptElement = document.getElementById('thermal-receipt');

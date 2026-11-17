@@ -108,8 +108,9 @@ export const NotificationProvider = ({ children }) => {
         const n = new Notification(title, options);
         n.onclick = () => {
           window.focus();
-          if (notification.metadata?.orderCode) {
-            window.location.href = `/tracker/${notification.metadata.orderCode}`;
+          const target = notification.metadata?.orderId || notification.order?._id || notification.metadata?.orderCode;
+          if (target) {
+            window.location.href = `/tracker/${target}`;
           }
           n.close();
         };
@@ -129,6 +130,7 @@ export const NotificationProvider = ({ children }) => {
       message: notification.message,
       icon: notification.icon || '🔔',
       priority: notification.priority || 'NORMAL',
+      orderId: notification.metadata?.orderId || notification.order?._id,
       orderCode: notification.metadata?.orderCode,
       createdAt: notification.createdAt || new Date(),
     };
