@@ -46,7 +46,6 @@ const POSBilling = () => {
   const [selectedVariants, setSelectedVariants] = useState({});
   const [discount, setDiscount] = useState(0);
   const paymentMethod = 'cash'; // POS billing strictly supports Cash Payment
-  const [cashGiven, setCashGiven] = useState('');
   const [parcelSettings, setParcelSettings] = useState({
     parcelEnabled: true,
     parcelChargePerItem: 5,
@@ -363,7 +362,6 @@ const POSBilling = () => {
   const clearCart = () => {
     setCart([]);
     setDiscount(0);
-    setCashGiven('');
   };
 
   // Calculations
@@ -979,66 +977,6 @@ const POSBilling = () => {
                   <span>Cash Payment</span>
                 </div>
               </div>
-
-              {/* Cash Given & Change Helper (Visible when Cash selected) */}
-              {grandTotal > 0 && (
-                <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-2.5 space-y-1.5 animate-in fade-in text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-stone-700">Cash Received from Customer:</span>
-                    <div className="relative w-28">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-stone-500">₹</span>
-                      <input
-                        type="number"
-                        min="0"
-                        value={cashGiven}
-                        onChange={(e) => setCashGiven(e.target.value)}
-                        placeholder={grandTotal.toFixed(0)}
-                        className="w-full pl-6 pr-2 py-1 bg-white border border-stone-300 rounded-lg text-right font-mono font-bold text-xs focus:outline-none focus:border-[#0b3d2e]"
-                      />
-                    </div>
-                  </div>
-
-                  {Number(cashGiven) > 0 && Number(cashGiven) >= grandTotal && (
-                    <div className="bg-emerald-100/80 border border-emerald-300 text-emerald-900 rounded-xl px-2.5 py-1.5 flex items-center justify-between font-bold">
-                      <span>Change to Return:</span>
-                      <span className="font-mono text-sm font-black text-emerald-950">
-                        ₹{(Number(cashGiven) - grandTotal).toFixed(2)}
-                      </span>
-                    </div>
-                  )}
-
-                  {Number(cashGiven) > 0 && Number(cashGiven) < grandTotal && (
-                    <div className="bg-rose-100/80 border border-rose-300 text-rose-800 rounded-xl px-2.5 py-1 flex items-center justify-between text-[11px] font-bold">
-                      <span>Short by:</span>
-                      <span className="font-mono">
-                        ₹{(grandTotal - Number(cashGiven)).toFixed(2)}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Quick Cash Suggestions */}
-                  <div className="flex items-center gap-1.5 pt-0.5">
-                    <span className="text-[10px] text-stone-500 font-bold">Quick:</span>
-                    <button
-                      type="button"
-                      onClick={() => setCashGiven(String(grandTotal))}
-                      className="px-2 py-0.5 bg-white border border-stone-200 hover:border-amber-500 rounded text-[10px] font-mono font-bold text-stone-700 transition"
-                    >
-                      ₹{grandTotal.toFixed(0)} (Exact)
-                    </button>
-                    {[50, 100, 200, 500].filter((val) => val > grandTotal).map((val) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setCashGiven(String(val))}
-                        className="px-2 py-0.5 bg-white border border-stone-200 hover:border-amber-500 rounded text-[10px] font-mono font-bold text-stone-700 transition"
-                      >
-                        ₹{val}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               {/* Discount Input & Subtotal */}
               <div className="flex items-center justify-between gap-2 text-xs">

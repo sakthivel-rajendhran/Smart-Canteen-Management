@@ -41,7 +41,7 @@ export const getOrCreateParcelSettings = async () => {
  */
 export const isCategoryParcelEligible = (cat) => {
   if (!cat) return true;
-  const catName = typeof cat === 'object' ? String(cat.name || '').trim().toLowerCase() : '';
+  const catName = typeof cat === 'object' ? String(cat.name || '').trim().toLowerCase() : String(cat).trim().toLowerCase();
   if (catName === 'snacks') return false;
   if (typeof cat === 'object' && cat.parcelEligible === false) return false;
   return true;
@@ -52,11 +52,12 @@ export const isCategoryParcelEligible = (cat) => {
  */
 export const isItemParcelEligible = (menuItem) => {
   if (!menuItem) return false;
+  if (menuItem.parcelEligible === false) return false;
   const assignedCats = [
     menuItem.category,
     ...(Array.isArray(menuItem.categories) ? menuItem.categories : []),
   ].filter(Boolean);
-  if (assignedCats.length === 0) return true;
+  if (assignedCats.length === 0) return menuItem.parcelEligible !== false;
   return assignedCats.every((cat) => isCategoryParcelEligible(cat));
 };
 

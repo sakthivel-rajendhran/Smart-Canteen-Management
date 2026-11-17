@@ -16,6 +16,7 @@ import {
   createAndEmitNotification,
   createAndEmitAdminNotification,
 } from '../utils/notificationHelper.js';
+import { emitHomepageStatsUpdate } from './homepageController.js';
 
 // Helper to query orders: uses _id when valid ObjectId, or exact uppercase token on active orders (no regex)
 const buildOrderQuery = (rawId) => {
@@ -360,6 +361,9 @@ const createOrder = async (req, res) => {
 
         io.to('admin').emit('order:created', populatedOrder);
 
+        // Real-time aggregate homepage stats broadcast
+        emitHomepageStatsUpdate(io);
+
         // Smart Notification Rule:
         // Admin notification: New Order Received (bulk insert, single notification per admin)
         await createAndEmitAdminNotification(io, {
@@ -562,6 +566,11 @@ const updateOrderStatus = async (req, res) => {
       // 2. Send ONLY to admin room
       io.to('admin').emit('order:updated', order);
 
+      // Invalidate and broadcast homepage stats if order was cancelled
+      if (status === 'Cancelled') {
+        emitHomepageStatsUpdate(io);
+      }
+
       // 3. Smart Notification: single customer notification when order reaches Pickup Bill
       if (status === 'Pickup Bill' && order.user && !order.pickupBillNotificationSent) {
         order.pickupBillNotificationSent = true;
@@ -714,6 +723,9 @@ const cancelOrder = async (req, res) => {
         paymentStatus: order.paymentStatus
       });
       io.to('admin').emit('order:updated', order);
+
+      // Invalidate and broadcast homepage stats on order cancellation
+      emitHomepageStatsUpdate(io);
     }
 
     res.json({ success: true, message: 'Order cancelled successfully', data: order });

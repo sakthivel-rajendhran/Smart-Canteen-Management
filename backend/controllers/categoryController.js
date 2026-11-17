@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Category from '../models/Category.js';
 import MenuItem from '../models/MenuItem.js';
 import { cache } from '../utils/cache.js';
+import { emitHomepageStatsUpdate } from './homepageController.js';
 
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -136,6 +137,7 @@ const createCategory = async (req, res) => {
     const io = req.app.get('socketio');
     if (io) {
       io.emit('category:created', payload);
+      emitHomepageStatsUpdate(io);
     }
 
     res.status(201).json({
@@ -219,6 +221,7 @@ const updateCategory = async (req, res) => {
     const io = req.app.get('socketio');
     if (io) {
       io.emit('category:updated', payload);
+      emitHomepageStatsUpdate(io);
     }
 
     res.json({
@@ -271,6 +274,7 @@ const deleteCategory = async (req, res) => {
     const io = req.app.get('socketio');
     if (io) {
       io.emit('category:deleted', { id: category._id.toString(), name: category.name });
+      emitHomepageStatsUpdate(io);
     }
 
     res.json({

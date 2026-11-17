@@ -101,6 +101,11 @@ const menuItemSchema = new mongoose.Schema(
       type: Number, // in minutes
       default: 10,
     },
+    parcelEligible: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
     variants: {
       type: [menuVariantSchema],
       default: [],

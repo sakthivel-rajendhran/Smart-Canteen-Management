@@ -48,7 +48,7 @@ export const itemMatchesCategorySearch = (item, queryLower) => {
 
 export const isCategoryParcelEligible = (cat) => {
   if (!cat) return true;
-  const name = typeof cat === 'object' ? String(cat.name || '').trim().toLowerCase() : '';
+  const name = typeof cat === 'object' ? String(cat.name || '').trim().toLowerCase() : String(cat).trim().toLowerCase();
   if (name === 'snacks') return false;
   if (typeof cat === 'object' && cat.parcelEligible === false) return false;
   return true;
@@ -56,8 +56,9 @@ export const isCategoryParcelEligible = (cat) => {
 
 export const isItemParcelEligible = (item) => {
   if (!item) return false;
+  if (item.parcelEligible === false) return false;
   const cats = getItemCategories(item);
-  if (cats.length === 0) return true;
+  if (cats.length === 0) return item.parcelEligible !== false;
   return cats.every((cat) => isCategoryParcelEligible(cat));
 };
 

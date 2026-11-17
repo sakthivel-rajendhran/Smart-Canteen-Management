@@ -17,14 +17,24 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { useSocket } from '../context/SocketContext';
 import { itemHasActiveCategory } from '../utils/categoryHelpers';
 
 const Home = () => {
   const { user } = useAuth();
   const { addToCart } = useCart();
+  const { socket } = useSocket();
   const [emojis, setEmojis] = useState([]);
   const [featuredItems, setFeaturedItems] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [stats, setStats] = useState({
+    ordersPlaced: null,
+    menuItems: null,
+    averagePreparationTime: null,
+    traditional: 'Authentic',
+  });
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState(false);
 
   useEffect(() => {
     const list = ['🍛', '🍲', '🥤', '☕', '🍩', '⚪️', '🫓', '🥥', '🍹', '🌿', '🍱', '🥗'];
@@ -71,6 +81,50 @@ const Home = () => {
     };
     fetchFeatured();
   }, []);
+
+  const fetchStats = async () => {
+    try {
+      const res = await API.get('/homepage/stats');
+      if (res.data?.success && res.data?.data) {
+        setStats(res.data.data);
+        setStatsError(false);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch homepage statistics:', err.message);
+      setStatsError(true);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+    const timer = setInterval(fetchStats, 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleStatsUpdate = (updatedStats) => {
+      if (updatedStats && typeof updatedStats === 'object') {
+        setStats((prev) => ({
+          ...prev,
+          ...updatedStats,
+        }));
+        setStatsLoading(false);
+        setStatsError(false);
+      }
+    };
+
+    socket.on('homepage:stats:update', handleStatsUpdate);
+    socket.on('reconnect', fetchStats);
+
+    return () => {
+      socket.off('homepage:stats:update', handleStatsUpdate);
+      socket.off('reconnect', fetchStats);
+    };
+  }, [socket]);
 
   const features = [
     { icon: <Smartphone className="w-6 h-6 text-primary" />, title: "Order from Anywhere", desc: "Order from your phone or laptop — no queue, no waiting at the counter." },
@@ -222,14 +276,55 @@ const Home = () => {
       <section className="bg-amber py-5 px-[5%]">
         <div className="max-w-6xl mx-auto flex flex-wrap justify-around items-center gap-6">
           {[
-            { num: "500+", label: "Orders Placed" },
-            { num: "21", label: "Menu Items" },
-            { num: "5 min", label: "Avg Prep Time" },
-            { num: "100%", label: "Traditional" }
+            {
+              num:
+                statsLoading && stats.ordersPlaced === null
+                  ? null
+                  : statsError && stats.ordersPlaced === null
+                  ? '—'
+                  : (stats.ordersPlaced ?? 0).toLocaleString(),
+              label: 'Orders Placed',
+            },
+            {
+              num:
+                statsLoading && stats.menuItems === null
+                  ? null
+                  : statsError && stats.menuItems === null
+                  ? '—'
+                  : stats.menuItems ?? 0,
+              label: 'Menu Items',
+            },
+            {
+              num:
+                statsLoading && stats.averagePreparationTime === null
+                  ? null
+                  : statsError && stats.averagePreparationTime === null
+                  ? '—'
+                  : `${stats.averagePreparationTime ?? 5} min`,
+              label: 'Avg Prep Time',
+            },
+            {
+              num: stats.traditional || 'Authentic',
+              label: 'Traditional Taste',
+            },
           ].map((stat, i) => (
-            <div key={i} className="text-center">
-              <div className="font-outfit font-black text-3xl text-primary-dark">{stat.num}</div>
-              <div className="text-[10px] uppercase font-bold text-primary-dark/60 tracking-wider mt-0.5">{stat.label}</div>
+            <div key={i} className="text-center min-w-[110px]">
+              {stat.num === null ? (
+                <div className="h-9 flex items-center justify-center">
+                  <span className="inline-block w-14 h-7 bg-primary-dark/20 rounded-md animate-pulse" />
+                </div>
+              ) : (
+                <div
+                  className={`font-outfit font-black ${
+                    typeof stat.num === 'string' && stat.num.length > 7 ? 'text-2xl' : 'text-3xl'
+                  } text-primary-dark`}
+                >
+                  {stat.num}
+                </div>
+              )}
+              <div className="text-[10px] uppercase font-bold text-primary-dark/60 tracking-wider mt-0.5">
+                {stat.label}
+              </div>
             </div>
           ))}
         </div>

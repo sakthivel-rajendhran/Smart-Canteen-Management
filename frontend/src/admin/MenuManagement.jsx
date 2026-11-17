@@ -7,6 +7,7 @@ import {
   itemMatchesCategory,
   itemMatchesCategorySearch,
   syncItemCategoryUpdate,
+  isItemParcelEligible,
 } from '../utils/categoryHelpers';
 import { useSocket } from '../context/SocketContext';
 import {
@@ -28,6 +29,7 @@ import {
   Eye,
   SlidersHorizontal,
   Check,
+  Package,
 } from 'lucide-react';
 
 const MenuManagement = () => {
@@ -59,6 +61,12 @@ const MenuManagement = () => {
   const [editingItem, setEditingItem] = useState(null);
   const [deletingItem, setDeletingItem] = useState(null);
   const [quickImageItem, setQuickImageItem] = useState(null);
+
+  // Global Parcel Packaging Settings (for service eligibility indicators)
+  const [parcelSettings, setParcelSettings] = useState({
+    parcelEnabled: true,
+    parcelChargePerItem: 5,
+  });
 
   // Form states for Add / Edit
   const [formName, setFormName] = useState('');
@@ -110,14 +118,26 @@ const MenuManagement = () => {
       setCategories((prev) => prev.filter((c) => c._id !== id));
     };
 
+    const handleParcelUpdated = (payload) => {
+      if (!payload) return;
+      const enabled = payload.parcelEnabled !== false;
+      const charge = Number(payload.parcelChargePerItem);
+      setParcelSettings({
+        parcelEnabled: enabled,
+        parcelChargePerItem: Number.isFinite(charge) && charge >= 0 ? charge : 5,
+      });
+    };
+
     socket.on('category:created', handleCategoryCreated);
     socket.on('category:updated', handleCategoryUpdated);
     socket.on('category:deleted', handleCategoryDeleted);
+    socket.on('parcel:settingsUpdated', handleParcelUpdated);
 
     return () => {
       socket.off('category:created', handleCategoryCreated);
       socket.off('category:updated', handleCategoryUpdated);
       socket.off('category:deleted', handleCategoryDeleted);
+      socket.off('parcel:settingsUpdated', handleParcelUpdated);
     };
   }, [socket]);
 
@@ -125,14 +145,23 @@ const MenuManagement = () => {
     try {
       setLoading(true);
       setError('');
-      const [menuRes, catRes] = await Promise.all([
+      const [menuRes, catRes, parcelRes] = await Promise.all([
         API.get('/menu'),
         API.get('/categories?all=true'),
+        API.get('/orders/parcel-settings').catch(() => ({ data: null })),
       ]);
 
       if (menuRes.data?.success && catRes.data?.success) {
         setMenuItems(menuRes.data.data);
         setCategories(catRes.data.data);
+      }
+      if (parcelRes?.data?.success && parcelRes.data.data) {
+        const enabled = parcelRes.data.data.parcelEnabled !== false;
+        const charge = Number(parcelRes.data.data.parcelChargePerItem);
+        setParcelSettings({
+          parcelEnabled: enabled,
+          parcelChargePerItem: Number.isFinite(charge) && charge >= 0 ? charge : 5,
+        });
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch menu items.');
@@ -304,6 +333,30 @@ const MenuManagement = () => {
       prev.includes(catId) ? prev.filter((id) => id !== catId) : [...prev, catId]
     );
   };
+
+  // Derive category-based Parcel / Normal service eligibility for Add / Edit forms:
+  // Food Items & Juices: Normal = Available, Parcel = Available (when global Parcel setting is ON)
+  // Snacks: Normal = Available, Parcel = Never available (do not show parcel configuration)
+  const formCategoryStatus = useMemo(() => {
+    const primaryDoc = categories.find((c) => String(c._id) === String(formCategory));
+    const primaryName = primaryDoc?.name || '';
+    const primaryLower = primaryName.trim().toLowerCase();
+
+    const extraDocs = categories.filter((c) => formAdditionalCategories.includes(c._id));
+    const allAssignedDocs = [primaryDoc, ...extraDocs].filter(Boolean);
+
+    const hasSnacks = allAssignedDocs.some(
+      (c) => String(c.name || '').trim().toLowerCase() === 'snacks' || c.parcelEligible === false
+    );
+
+    const isEligible = !hasSnacks && (primaryLower === 'food items' || primaryLower === 'juices' || primaryDoc?.parcelEligible !== false);
+
+    return {
+      primaryName,
+      isSnacks: primaryLower === 'snacks' || hasSnacks,
+      isEligible,
+    };
+  }, [categories, formCategory, formAdditionalCategories]);
 
   // Submit Add Food
   const handleAddFood = async (e) => {
@@ -822,22 +875,33 @@ const MenuManagement = () => {
                         </div>
                       </td>
 
-                      {/* Category */}
+                      {/* Category & Service Options */}
                       <td className="py-3.5 px-4">
-                        <div className="flex flex-wrap items-center gap-1">
-                          {getItemCategories(item).map((catObj) => (
-                            <span
-                              key={catObj._id || catObj.name}
-                              className={`inline-flex items-center font-bold rounded-full px-2.5 py-0.5 text-[10px] ${
-                                catObj.active === false
-                                  ? 'bg-gray-100 text-gray-600'
-                                  : 'bg-primary-light text-primary-dark'
-                              }`}
-                            >
-                              {catObj.name || 'Canteen'}
-                              {catObj.active === false ? ' (Inactive)' : ''}
+                        <div className="flex flex-col gap-1.5 items-start">
+                          <div className="flex flex-wrap items-center gap-1">
+                            {getItemCategories(item).map((catObj) => (
+                              <span
+                                key={catObj._id || catObj.name}
+                                className={`inline-flex items-center font-bold rounded-full px-2.5 py-0.5 text-[10px] ${
+                                  catObj.active === false
+                                    ? 'bg-gray-100 text-gray-600'
+                                    : 'bg-primary-light text-primary-dark'
+                                }`}
+                              >
+                                {catObj.name || 'Canteen'}
+                                {catObj.active === false ? ' (Inactive)' : ''}
+                              </span>
+                            ))}
+                          </div>
+                          {isItemParcelEligible(item) ? (
+                            <span className="inline-flex items-center gap-1 font-bold rounded-full px-2 py-0.5 text-[9px] bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              <Package className="w-2.5 h-2.5" /> Normal + Parcel
                             </span>
-                          ))}
+                          ) : (
+                            <span className="inline-flex items-center gap-1 font-bold rounded-full px-2 py-0.5 text-[9px] bg-stone-100 text-stone-600 border border-stone-200">
+                              Normal Only
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -985,11 +1049,23 @@ const MenuManagement = () => {
                     </span>
                   </div>
 
-                  <span className="text-[10px] text-muted mb-4 block">
-                    {getItemCategories(item)
-                      .map((c) => `${c.name}${c.active === false ? ' (Inactive)' : ''}`)
-                      .join(' · ') || 'Canteen'}
-                  </span>
+                  <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                    <span className="text-[10px] text-muted">
+                      {getItemCategories(item)
+                        .map((c) => `${c.name}${c.active === false ? ' (Inactive)' : ''}`)
+                        .join(' · ') || 'Canteen'}
+                    </span>
+                    <span className="text-muted/40">•</span>
+                    {isItemParcelEligible(item) ? (
+                      <span className="inline-flex items-center gap-1 font-bold rounded-full px-2 py-0.2 text-[9px] bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        <Package className="w-2.5 h-2.5" /> Normal + Parcel
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 font-bold rounded-full px-2 py-0.2 text-[9px] bg-stone-100 text-stone-600 border border-stone-200">
+                        Normal Only
+                      </span>
+                    )}
+                  </div>
 
                   {/* Actions Row */}
                   <div className="mt-auto flex items-center gap-2 pt-3 border-t border-gray-100">
@@ -1131,6 +1207,93 @@ const MenuManagement = () => {
                         );
                       })}
                   </div>
+                </div>
+              )}
+
+              {/* Category-Based Service Options & Parcel Packaging */}
+              {formCategoryStatus.isSnacks ? (
+                /* Snacks Category: Normal Only (No parcel configuration controls) */
+                <div className="bg-stone-50 border border-stone-200/90 rounded-2xl p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
+                      <Package className="w-3.5 h-3.5 text-stone-500" /> Service Options & Packaging
+                    </span>
+                    <span className="bg-stone-200 text-stone-800 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
+                      Normal Service Only
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-white border border-stone-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                      <div>
+                        <span className="font-bold text-stone-900 block leading-tight">Normal Service</span>
+                        <span className="text-[10px] text-stone-500">Available (Counter / Dine-in)</span>
+                      </div>
+                    </div>
+                    <div className="bg-stone-100/80 border border-stone-200/70 p-2.5 rounded-xl text-xs flex items-center gap-2 opacity-60">
+                      <div className="w-2 h-2 rounded-full bg-stone-400" />
+                      <div>
+                        <span className="font-bold text-stone-600 block leading-tight">Parcel Service</span>
+                        <span className="text-[10px] text-stone-500">Disabled for Snacks</span>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-stone-500 font-medium leading-relaxed">
+                    ℹ️ <strong>Category Rule:</strong> Snacks are strictly Normal service only. Parcel packaging is never offered for Snacks.
+                  </p>
+                  {editingItem && (editingItem.category?.name || '').trim().toLowerCase() !== 'snacks' && (
+                    <div className="bg-amber-100 border border-amber-300 text-amber-950 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                      <span>Category changed to Snacks: Parcel packaging will become unavailable for this item upon saving.</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Food Items / Juices Category: Normal & Parcel Available */
+                <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-2xl p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
+                      <Package className="w-3.5 h-3.5 text-emerald-700" /> Service Options & Packaging
+                    </span>
+                    <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase border ${
+                      parcelSettings.parcelEnabled
+                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                        : 'bg-amber-100 text-amber-900 border-amber-300'
+                    }`}>
+                      {parcelSettings.parcelEnabled
+                        ? `✓ Parcel Active (+₹${parcelSettings.parcelChargePerItem})`
+                        : 'Global Parcel OFF'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-white border border-emerald-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <div>
+                        <span className="font-bold text-emerald-950 block leading-tight">Normal Service</span>
+                        <span className="text-[10px] text-emerald-800">Available (₹0 fee)</span>
+                      </div>
+                    </div>
+                    <div className="bg-white border border-emerald-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
+                      <div className="w-2 h-2 rounded-full bg-amber-500" />
+                      <div>
+                        <span className="font-bold text-emerald-950 block leading-tight">Parcel Service</span>
+                        <span className="text-[10px] text-emerald-800">
+                          {parcelSettings.parcelEnabled
+                            ? `Available (+₹${parcelSettings.parcelChargePerItem}/unit)`
+                            : 'Available when Global Parcel ON'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-emerald-800 font-medium leading-relaxed">
+                    ✓ <strong>Auto-Configured:</strong> {formCategoryStatus.primaryName || 'Food Items / Juices'} automatically support both Normal and Parcel service. Customers can choose Parcel whenever the global Parcel setting is ON.
+                  </p>
+                  {editingItem && (editingItem.category?.name || '').trim().toLowerCase() === 'snacks' && (
+                    <div className="bg-emerald-100 border border-emerald-300 text-emerald-950 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <span>Category changed from Snacks: Parcel packaging will become active for this item upon saving.</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1408,6 +1571,93 @@ const MenuManagement = () => {
                         );
                       })}
                   </div>
+                </div>
+              )}
+
+              {/* Category-Based Service Options & Parcel Packaging */}
+              {formCategoryStatus.isSnacks ? (
+                /* Snacks Category: Normal Only (No parcel configuration controls) */
+                <div className="bg-stone-50 border border-stone-200/90 rounded-2xl p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
+                      <Package className="w-3.5 h-3.5 text-stone-500" /> Service Options & Packaging
+                    </span>
+                    <span className="bg-stone-200 text-stone-800 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
+                      Normal Service Only
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-white border border-stone-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                      <div>
+                        <span className="font-bold text-stone-900 block leading-tight">Normal Service</span>
+                        <span className="text-[10px] text-stone-500">Available (Counter / Dine-in)</span>
+                      </div>
+                    </div>
+                    <div className="bg-stone-100/80 border border-stone-200/70 p-2.5 rounded-xl text-xs flex items-center gap-2 opacity-60">
+                      <div className="w-2 h-2 rounded-full bg-stone-400" />
+                      <div>
+                        <span className="font-bold text-stone-600 block leading-tight">Parcel Service</span>
+                        <span className="text-[10px] text-stone-500">Disabled for Snacks</span>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-stone-500 font-medium leading-relaxed">
+                    ℹ️ <strong>Category Rule:</strong> Snacks are strictly Normal service only. Parcel packaging is never offered for Snacks.
+                  </p>
+                  {editingItem && (editingItem.category?.name || '').trim().toLowerCase() !== 'snacks' && (
+                    <div className="bg-amber-100 border border-amber-300 text-amber-950 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                      <span>Category changed to Snacks: Parcel packaging will become unavailable for this item upon saving.</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Food Items / Juices Category: Normal & Parcel Available */
+                <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-2xl p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
+                      <Package className="w-3.5 h-3.5 text-emerald-700" /> Service Options & Packaging
+                    </span>
+                    <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase border ${
+                      parcelSettings.parcelEnabled
+                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                        : 'bg-amber-100 text-amber-900 border-amber-300'
+                    }`}>
+                      {parcelSettings.parcelEnabled
+                        ? `✓ Parcel Active (+₹${parcelSettings.parcelChargePerItem})`
+                        : 'Global Parcel OFF'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-white border border-emerald-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <div>
+                        <span className="font-bold text-emerald-950 block leading-tight">Normal Service</span>
+                        <span className="text-[10px] text-emerald-800">Available (₹0 fee)</span>
+                      </div>
+                    </div>
+                    <div className="bg-white border border-emerald-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
+                      <div className="w-2 h-2 rounded-full bg-amber-500" />
+                      <div>
+                        <span className="font-bold text-emerald-950 block leading-tight">Parcel Service</span>
+                        <span className="text-[10px] text-emerald-800">
+                          {parcelSettings.parcelEnabled
+                            ? `Available (+₹${parcelSettings.parcelChargePerItem}/unit)`
+                            : 'Available when Global Parcel ON'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-emerald-800 font-medium leading-relaxed">
+                    ✓ <strong>Auto-Configured:</strong> {formCategoryStatus.primaryName || 'Food Items / Juices'} automatically support both Normal and Parcel service. Customers can choose Parcel whenever the global Parcel setting is ON.
+                  </p>
+                  {editingItem && (editingItem.category?.name || '').trim().toLowerCase() === 'snacks' && (
+                    <div className="bg-emerald-100 border border-emerald-300 text-emerald-950 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <span>Category changed from Snacks: Parcel packaging will become active for this item upon saving.</span>
+                    </div>
+                  )}
                 </div>
               )}
 

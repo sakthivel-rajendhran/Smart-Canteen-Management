@@ -9,6 +9,7 @@ import {
   uploadToCloudinary,
   deleteCloudinaryAsset,
 } from '../config/cloudinary.js';
+import { emitHomepageStatsUpdate } from './homepageController.js';
 
 // Helper to normalize image structure and multi-category array for backward compatibility
 // When isList is true, huge legacy base64 data URIs are stripped to keep list payloads minimal
@@ -40,6 +41,7 @@ const normalizeMenuItemImage = (item, isList = false) => {
   }
   plain.categories = combined;
   plain.variants = Array.isArray(plain.variants) ? plain.variants : [];
+  plain.parcelEligible = isItemParcelEligible(plain);
   return plain;
 };
 
@@ -411,6 +413,16 @@ const createMenuItem = async (req, res) => {
       uploadedPublicId = uploadResult.publicId;
     }
 
+    // Determine category-based parcel eligibility:
+    // Food Items & Juices: parcelEligible = true (available when global Parcel setting is ON)
+    // Snacks: parcelEligible = false (never available)
+    const allAssignedCatIds = [category, ...normalizedCatIds].filter(Boolean);
+    const assignedCatDocs = await Category.find({ _id: { $in: allAssignedCatIds } }).lean();
+    const hasSnacksCategory = assignedCatDocs.some(
+      (c) => String(c.name || '').trim().toLowerCase() === 'snacks' || c.parcelEligible === false
+    );
+    const isParcelEligible = !hasSnacksCategory;
+
     let menuItem;
     try {
       menuItem = await MenuItem.create({
@@ -427,6 +439,7 @@ const createMenuItem = async (req, res) => {
         preparationTime: preparationTime ? Number(preparationTime) : 10,
         adminReviewNote: adminReviewNote ? String(adminReviewNote).trim() : '',
         variants: parsedVariants || [],
+        parcelEligible: isParcelEligible,
       });
     } catch (dbError) {
       // Handle orphan cleanup: if upload succeeded but DB save failed, delete from Cloudinary
@@ -445,6 +458,7 @@ const createMenuItem = async (req, res) => {
     const io = req.app.get('socketio');
     if (io) {
       io.emit('menu:created', normalizedItem);
+      emitHomepageStatsUpdate(io);
     }
 
     cache.clearPrefix('menu');
@@ -592,6 +606,16 @@ const updateMenuItem = async (req, res) => {
     if (preparationTime !== undefined) menuItem.preparationTime = Number(preparationTime);
     if (adminReviewNote !== undefined) menuItem.adminReviewNote = String(adminReviewNote).trim();
 
+    // Determine category-based parcel eligibility:
+    // Food Items & Juices: parcelEligible = true (available when global Parcel setting is ON)
+    // Snacks: parcelEligible = false (never available)
+    const allAssignedCatIds = [menuItem.category, ...(Array.isArray(menuItem.categories) ? menuItem.categories : [])].filter(Boolean);
+    const assignedCatDocs = await Category.find({ _id: { $in: allAssignedCatIds } }).lean();
+    const hasSnacksCategory = assignedCatDocs.some(
+      (c) => String(c.name || '').trim().toLowerCase() === 'snacks' || c.parcelEligible === false
+    );
+    menuItem.parcelEligible = !hasSnacksCategory;
+
     try {
       await menuItem.save();
     } catch (saveError) {
@@ -618,6 +642,7 @@ const updateMenuItem = async (req, res) => {
     const io = req.app.get('socketio');
     if (io) {
       io.emit('menu:updated', normalizedItem);
+      emitHomepageStatsUpdate(io);
     }
 
     cache.clearPrefix('menu');
@@ -665,6 +690,7 @@ const deleteMenuItem = async (req, res) => {
     const io = req.app.get('socketio');
     if (io) {
       io.emit('menu:deleted', { id: req.params.id });
+      emitHomepageStatsUpdate(io);
     }
 
     cache.clearPrefix('menu');
@@ -707,6 +733,7 @@ const toggleAvailability = async (req, res) => {
         available: menuItem.available,
       });
       io.emit('menu:updated', normalizedItem);
+      emitHomepageStatsUpdate(io);
     }
 
     cache.clearPrefix('menu');

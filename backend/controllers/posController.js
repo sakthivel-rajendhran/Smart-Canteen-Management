@@ -16,6 +16,7 @@ import {
   createAndEmitNotification,
   createAndEmitAdminNotification,
 } from '../utils/notificationHelper.js';
+import { emitHomepageStatsUpdate } from './homepageController.js';
 
 // Safe query helper: uses _id when valid ObjectId, or exact uppercase token on active/completed orders (no regex)
 const buildSafeOrderQuery = (rawQuery) => {
@@ -192,6 +193,9 @@ export const createWalkInOrder = async (req, res) => {
     if (io) {
       io.to('admin').emit('pos:sale:completed', order);
 
+      // Real-time aggregate homepage stats broadcast
+      emitHomepageStatsUpdate(io);
+
       // Create idempotent admin notification for walk-in sale
       createAndEmitAdminNotification(io, {
         title: '💵 Direct POS Sale Completed',
@@ -223,33 +227,80 @@ export const createWalkInOrder = async (req, res) => {
   }
 };
 
-// @desc    Get All Orders for Handover Management Queue (Pending vs Completed)
+// @desc    Get All Orders for Handover Management Queue (Pending vs Completed vs All)
 // @route   GET /api/admin/pos/handover-orders
 // @access  Private/Admin
 export const getHandoverOrders = async (req, res) => {
   try {
-    const { filter = 'pending', search = '' } = req.query;
+    const {
+      filter = 'pending',
+      search = '',
+      page = 1,
+      limit = 25,
+      dateRange = 'all',
+      status = 'all',
+    } = req.query;
+
     const query = {};
 
+    // 1. Primary Filter Tabs
     if (filter === 'completed') {
       query.status = { $in: ['Handover Bill', 'Completed'] };
-      query.orderType = { $ne: 'WALK_IN' };
     } else if (filter === 'all') {
-      query.status = { $in: ['Ready', 'Pickup Bill', 'Handover Bill', 'Completed'] };
-      query.orderType = { $ne: 'WALK_IN' };
+      // Sub-status filter for "All Orders" tab
+      if (status === 'pending') {
+        query.status = { $in: ['Pickup Bill', 'Ready'] };
+        query.handoverVerified = { $ne: true };
+      } else if (status === 'completed') {
+        query.status = { $in: ['Handover Bill', 'Completed'] };
+      } else if (status === 'cancelled') {
+        query.status = 'Cancelled';
+      } else if (status === 'preparing') {
+        query.status = { $in: ['Placed', 'Confirmed', 'Preparing'] };
+      } else if (status !== 'all') {
+        query.status = status;
+      }
     } else {
-      // Pending handovers: online orders waiting for final collection & bill print ('Pickup Bill' or 'Ready')
+      // Pending handovers: orders waiting for physical collection ('Pickup Bill' or 'Ready')
       query.status = { $in: ['Pickup Bill', 'Ready'] };
       query.handoverVerified = { $ne: true };
-      query.orderType = { $ne: 'WALK_IN' };
     }
 
+    // 2. Date Range Filter for "All Orders" Tab (IST timezone)
+    if (filter === 'all' && dateRange !== 'all') {
+      const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+      const [y, m, d] = todayStr.split('-').map(Number);
+      let rangeStart = null;
+      let rangeEnd = new Date(`${todayStr}T23:59:59.999+05:30`);
+
+      if (dateRange === 'today') {
+        rangeStart = new Date(`${todayStr}T00:00:00.000+05:30`);
+      } else if (dateRange === 'yesterday') {
+        const prev = new Date(Date.UTC(y, m - 1, d - 1));
+        const yestStr = prev.toISOString().slice(0, 10);
+        rangeStart = new Date(`${yestStr}T00:00:00.000+05:30`);
+        rangeEnd = new Date(`${yestStr}T23:59:59.999+05:30`);
+      } else if (dateRange === '7days') {
+        const prev = new Date(Date.UTC(y, m - 1, d - 6));
+        const sStr = prev.toISOString().slice(0, 10);
+        rangeStart = new Date(`${sStr}T00:00:00.000+05:30`);
+      } else if (dateRange === '30days') {
+        const prev = new Date(Date.UTC(y, m - 1, d - 29));
+        const sStr = prev.toISOString().slice(0, 10);
+        rangeStart = new Date(`${sStr}T00:00:00.000+05:30`);
+      }
+
+      if (rangeStart && rangeEnd) {
+        query.createdAt = { $gte: rangeStart, $lte: rangeEnd };
+      }
+    }
+
+    // 3. Search Filter across Token, OrderCode, Customer Name, Phone
     if (search && search.trim()) {
       const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const searchRegex = new RegExp(safeSearch, 'i');
       const cleanToken = search.trim().replace(/^#/, '').toUpperCase();
 
-      // Match online registered users by name, phone, registerNumber, staffId
       const matchingUsers = await User.find({
         $or: [
           { name: searchRegex },
@@ -261,7 +312,6 @@ export const getHandoverOrders = async (req, res) => {
       }).select('_id').lean();
       const userIds = matchingUsers.map((u) => u._id);
 
-      // Exact case-insensitive match on 4-char token; customer name & phone as regex
       query.$or = [
         { orderCode: cleanToken },
         { pickupToken: cleanToken },
@@ -273,14 +323,34 @@ export const getHandoverOrders = async (req, res) => {
       ];
     }
 
-    const [orders, pendingCount, completedCount] = await Promise.all([
+    // 4. Pagination Setup
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+    const skip = (pageNum - 1) * limitNum;
+
+    // Sort order:
+    // Pending -> oldest ready orders first so earlier customers are served
+    // Completed / All -> newest handovers/orders first
+    let sortOption = { createdAt: -1 };
+    if (filter === 'pending') {
+      sortOption = { updatedAt: 1, createdAt: 1 };
+    } else if (filter === 'completed') {
+      sortOption = { completedAt: -1, updatedAt: -1 };
+    }
+
+    const [orders, totalMatched, pendingCount, completedCount, totalOrdersCount] = await Promise.all([
       Order.find(query)
         .populate('user', 'name email phone role accountType studentDetails staffDetails')
         .populate('cashier', 'name')
-        .sort(filter === 'completed' ? { completedAt: -1, updatedAt: -1 } : { updatedAt: 1 })
+        .populate('handoverVerifiedBy', 'name email role')
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limitNum)
         .lean(),
+      Order.countDocuments(query),
       Order.countDocuments({ status: { $in: ['Pickup Bill', 'Ready'] }, handoverVerified: { $ne: true } }),
       Order.countDocuments({ status: { $in: ['Handover Bill', 'Completed'] } }),
+      Order.countDocuments({}),
     ]);
 
     res.json({
@@ -290,7 +360,69 @@ export const getHandoverOrders = async (req, res) => {
       stats: {
         pending: pendingCount,
         completed: completedCount,
+        total: totalOrdersCount,
       },
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: totalMatched,
+        totalPages: Math.ceil(totalMatched / limitNum) || 1,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Non-mutating verification lookup for Counter Handover
+// @route   GET /api/admin/pos/verify-lookup
+// @access  Private/Admin
+export const lookupOrderForVerification = async (req, res) => {
+  try {
+    const { token, orderId } = req.query;
+    const term = token || orderId;
+
+    if (!term || !String(term).trim()) {
+      return res.status(400).json({ success: false, message: 'Please provide a pickup token or order ID.' });
+    }
+
+    const query = buildSafeOrderQuery(String(term).trim());
+    const order = await Order.findOne(query)
+      .populate('user', 'name email phone role accountType studentDetails staffDetails')
+      .populate('cashier', 'name')
+      .populate('handoverVerifiedBy', 'name email role')
+      .sort({ createdAt: -1 });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: `No order found matching "${String(term).trim()}". Please check the token.`,
+      });
+    }
+
+    let eligibility = 'eligible';
+    let message = 'Order verified and ready for physical food handover.';
+
+    if (order.status === 'Handover Bill' || order.status === 'Completed' || order.handoverVerified) {
+      eligibility = 'already_handed_over';
+      const time = order.completedAt || order.handoverVerifiedAt
+        ? new Date(order.completedAt || order.handoverVerifiedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+        : 'earlier';
+      const verifierName = order.handoverVerifiedBy?.name || 'Staff';
+      message = `Order already collected! Order #${order.orderCode} (Token #${order.pickupToken || order.orderCode}) was handed over at ${time} by ${verifierName}. Do NOT hand over food again.`;
+    } else if (order.status === 'Cancelled') {
+      eligibility = 'cancelled';
+      message = `Order #${order.orderCode} was cancelled and cannot be handed over.`;
+    } else if (['Placed', 'Confirmed', 'Preparing'].includes(order.status)) {
+      eligibility = 'not_ready';
+      message = `Order #${order.orderCode} is currently in kitchen status "${order.status}". It has not yet been marked Ready for collection.`;
+    }
+
+    res.json({
+      success: true,
+      data: order,
+      eligibility,
+      message,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
