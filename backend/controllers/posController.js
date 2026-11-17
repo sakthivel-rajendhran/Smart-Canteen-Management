@@ -4,6 +4,7 @@ import Order from '../models/Order.js';
 import User from '../models/User.js';
 import MenuItem from '../models/MenuItem.js';
 import CanteenSettings from '../models/CanteenSettings.js';
+import { cache } from '../utils/cache.js';
 import {
   getOrCreateParcelSettings,
   isItemParcelEligible,
@@ -390,18 +391,11 @@ export const verifyAndHandoverOrder = async (req, res) => {
 
     await order.save();
 
-    // Broadcast real-time status update
+    // Broadcast real-time status update to admin and user rooms
     const io = req.app.get('socketio');
     if (io) {
       io.to('admin').emit('order:updated', order);
 
-      // Broadcast removal from public counter display
-      io.emit('pickup:readyTokensChanged', {
-        orderId: order._id,
-        orderCode: order.orderCode,
-        pickupToken: order.pickupToken || order.orderCode,
-        status: 'Handover Bill',
-      });
       if (order.user) {
         // Update customer tracking timeline immediately without generating a customer notification
         io.to(`user:${order.user._id || order.user}`).emit('order:statusChanged', {
@@ -804,7 +798,10 @@ export const getAdminParcelSettings = async (req, res) => {
 export const updateAdminParcelSettings = async (req, res) => {
   try {
     const { parcelEnabled, parcelChargePerItem } = req.body;
-    const { settings } = await getOrCreateParcelSettings();
+    let settings = await CanteenSettings.findOne({ key: 'default' });
+    if (!settings) {
+      settings = new CanteenSettings({ key: 'default' });
+    }
 
     if (parcelEnabled !== undefined) {
       if (typeof parcelEnabled !== 'boolean') {
@@ -825,6 +822,7 @@ export const updateAdminParcelSettings = async (req, res) => {
     }
 
     await settings.save();
+    cache.delete('settings:parcel');
 
     const updatedPayload = {
       parcelEnabled: settings.parcelEnabled !== false,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -46,6 +46,7 @@ const Cart = () => {
 
   const [couponInput, setCouponInput] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cod'); // 'cod' or 'razorpay'
+  const checkoutRequestIdRef = useRef(null);
   
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
@@ -89,6 +90,11 @@ const Cart = () => {
         return;
       }
 
+      // Generate or reuse clientRequestId for idempotent checkout retries
+      if (!checkoutRequestIdRef.current) {
+        checkoutRequestIdRef.current = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      }
+
       // 2. Create order record on backend
       const orderData = {
         items: cart.map((i) => ({
@@ -99,7 +105,8 @@ const Cart = () => {
           serviceType: parcelEnabled && i.serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL',
         })),
         couponCode: couponsEnabled && coupon ? coupon.code : '',
-        paymentMethod: paymentMethod
+        paymentMethod: paymentMethod,
+        clientRequestId: checkoutRequestIdRef.current,
       };
 
       const orderResponse = await API.post('/orders', orderData);
@@ -111,6 +118,7 @@ const Cart = () => {
 
       // 3. Handle Cash vs. Online Checkout
       if (paymentMethod === 'cod') {
+        checkoutRequestIdRef.current = null;
         setSuccessOrderCode(createdOrder.orderCode);
         clearCart();
       } else {
@@ -158,6 +166,7 @@ const Cart = () => {
             });
 
             if (verifyRes.data?.success) {
+              checkoutRequestIdRef.current = null;
               setSuccessOrderCode(order.orderCode);
               clearCart();
             } else {

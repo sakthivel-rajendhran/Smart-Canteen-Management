@@ -142,6 +142,10 @@ export const createAndEmitNotification = async (io, options) => {
  * Notify all admins idempotently via Socket.IO and persist one notification per admin account.
  * Deduplication Guarantee: Emits strictly to user:${admin._id} once, avoiding duplicate room broadcasts.
  */
+// Cached admin accounts list (TTL: 60s) to prevent DB queries on every order placement
+let cachedAdmins = null;
+let cachedAdminsTime = 0;
+
 export const createAndEmitAdminNotification = async (io, options) => {
   const {
     title,
@@ -155,71 +159,77 @@ export const createAndEmitAdminNotification = async (io, options) => {
   } = options;
 
   try {
-    // Construct stable admin eventId
     const eventId =
       customEventId ||
       `ORDER_ADMIN_${orderCode || orderId || 'EVT'}_PLACED`;
 
-    // Find all administrative accounts
-    const admins = await User.find({
-      role: { $in: ['admin', 'ADMIN'] },
-    }).select('_id name email');
+    // Retrieve admins from cache or DB
+    const now = Date.now();
+    let admins = cachedAdmins;
+    if (!admins || now - cachedAdminsTime > 60000) {
+      admins = await User.find({
+        role: { $in: ['admin', 'ADMIN'] },
+      }).select('_id name email').lean();
+      cachedAdmins = admins;
+      cachedAdminsTime = now;
+    }
 
-    const createdNotifications = [];
+    if (!admins || admins.length === 0) return [];
 
-    for (const admin of admins) {
-      try {
-        // 1. Check if this admin already has a notification for this event
-        const existing = await Notification.findOne({ user: admin._id, eventId });
-        if (existing) {
-          createdNotifications.push(existing);
-          continue;
-        }
+    const adminIds = admins.map((a) => a._id);
 
-        // 2. Atomically create one notification for this admin
-        let notification;
-        try {
-          notification = await Notification.create({
-            user: admin._id,
-            order: orderId || undefined,
-            eventId,
-            type: 'SYSTEM',
-            title,
-            message,
-            icon,
-            priority,
-            metadata: {
-              orderCode: orderCode || '',
-              ...metadata,
-            },
-            read: false,
-          });
-        } catch (createErr) {
-          if (createErr.code === 11000) {
-            notification = await Notification.findOne({ user: admin._id, eventId });
-          } else {
-            throw createErr;
-          }
-        }
+    // If event is for a newly generated order code, it is guaranteed unique; otherwise check
+    let alreadyNotifiedUserIds = new Set();
+    if (!eventId.startsWith('ORDER_ADMIN_') || !orderCode) {
+      const existingNotifications = await Notification.find({
+        user: { $in: adminIds },
+        eventId,
+      }).select('user').lean();
+      alreadyNotifiedUserIds = new Set(existingNotifications.map((n) => n.user.toString()));
+    }
 
-        if (notification) {
-          createdNotifications.push(notification);
+    const docsToInsert = admins
+      .filter((admin) => !alreadyNotifiedUserIds.has(admin._id.toString()))
+      .map((admin) => ({
+        user: admin._id,
+        order: orderId || undefined,
+        eventId,
+        type: 'SYSTEM',
+        title,
+        message,
+        icon,
+        priority,
+        metadata: {
+          orderCode: orderCode || '',
+          ...metadata,
+        },
+        read: false,
+      }));
 
-          // 3. Emit ONLY to this admin's personal authenticated room.
-          // Note: DO NOT broadcast to 'admin' room here, because admin sockets already join user:${admin._id}.
-          // Emitting to both caused duplicate real-time alerts.
-          if (io) {
-            io.to(`user:${admin._id}`).emit('notification:new', notification);
-          }
-        }
-      } catch (adminErr) {
-        console.error(`[NOTIFICATION] Failed to deliver admin notification to ${admin._id}:`, adminErr.message);
+    if (docsToInsert.length === 0) {
+      return existingNotifications;
+    }
+
+    // 3. One single bulk insert instead of a loop of saves
+    let created = [];
+    try {
+      created = await Notification.insertMany(docsToInsert, { ordered: false });
+    } catch (insertErr) {
+      if (insertErr.insertedDocs) {
+        created = insertErr.insertedDocs;
       }
     }
 
-    return createdNotifications;
+    // 4. Emit to each notified admin's private room
+    if (io && Array.isArray(created)) {
+      for (const notif of created) {
+        io.to(`user:${notif.user}`).emit('notification:new', notif);
+      }
+    }
+
+    return created;
   } catch (err) {
-    console.error('Error creating admin notifications:', err.message);
+    console.error('Error creating admin notifications (bulk):', err.message);
     return [];
   }
 };

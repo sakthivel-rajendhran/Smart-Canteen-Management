@@ -1,13 +1,20 @@
 import CanteenSettings from '../models/CanteenSettings.js';
+import { cache } from './cache.js';
 
 /**
  * Fetches or initializes the singleton CanteenSettings document and resolves
  * validated parcel configuration (parcelEnabled + non-negative parcelChargePerItem).
  */
 export const getOrCreateParcelSettings = async () => {
-  let settings = await CanteenSettings.findOne({ key: 'default' });
+  const cached = cache.get('settings:parcel');
+  if (cached) {
+    return cached;
+  }
+
+  let settings = await CanteenSettings.findOne({ key: 'default' }).lean();
   if (!settings) {
     settings = await CanteenSettings.create({ key: 'default' });
+    if (settings.toObject) settings = settings.toObject();
   }
 
   const parcelEnabled = settings.parcelEnabled !== false;
@@ -18,11 +25,14 @@ export const getOrCreateParcelSettings = async () => {
       ? parsedCharge
       : 5;
 
-  return {
+  const result = {
     settings,
     parcelEnabled,
     parcelChargePerItem,
   };
+
+  cache.set('settings:parcel', result, 45);
+  return result;
 };
 
 /**

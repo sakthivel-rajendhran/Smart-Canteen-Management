@@ -118,6 +118,8 @@ const menuItemSchema = new mongoose.Schema(
 );
 
 // Compound index for optimized category and status filtering
+menuItemSchema.index({ category: 1, available: 1 });
+menuItemSchema.index({ featured: 1 });
 menuItemSchema.index({ category: 1, available: 1, featured: 1 });
 menuItemSchema.index({ categories: 1, available: 1, featured: 1 });
 menuItemSchema.index({ variantParent: 1, available: 1 });

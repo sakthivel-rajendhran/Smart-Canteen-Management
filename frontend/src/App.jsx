@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
 // Providers Context
@@ -16,13 +16,15 @@ import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 import NotificationToast from './components/notifications/NotificationToast';
 import PWAInstaller from './components/common/PWAInstaller';
+import ColdStartBanner from './components/common/ColdStartBanner';
+import { getDefaultApiUrl } from './services/api';
 
 // Core Student Pages (eager loaded for fast first render)
 import Home from './pages/Home';
-import Login from './pages/Login';
 import Menu from './pages/Menu';
 
 // Lazy-loaded Student Pages
+const Login = lazy(() => import('./pages/Login'));
 const Cart = lazy(() => import('./pages/Cart'));
 const Tracker = lazy(() => import('./pages/Tracker'));
 const Bill = lazy(() => import('./pages/Bill'));
@@ -53,6 +55,16 @@ const PageFallback = () => (
 );
 
 function App() {
+  useEffect(() => {
+    // Fire-and-forget health check on initial app mount to warm up Render free container
+    try {
+      const apiUrl = getDefaultApiUrl();
+      fetch(`${apiUrl}/health`, {
+        headers: { 'X-Silent-Ping': 'true' },
+      }).catch(() => {});
+    } catch (e) {}
+  }, []);
+
   return (
     <Router>
       <AuthProvider>
@@ -60,6 +72,7 @@ function App() {
           <CartProvider>
             <NotificationProvider>
               <div className="flex flex-col min-h-screen">
+                <ColdStartBanner />
                 <NotificationToast />
                 <PWAInstaller />
                 <Navbar />

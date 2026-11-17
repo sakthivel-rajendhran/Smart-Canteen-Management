@@ -13,11 +13,17 @@ import {
 // Helper to normalize image structure and multi-category array for backward compatibility
 // When isList is true, huge legacy base64 data URIs are stripped to keep list payloads minimal
 const normalizeMenuItemImage = (item, isList = false) => {
+  if (!item) return item;
   const plain = item.toObject ? item.toObject() : { ...item };
   if (!plain.image || typeof plain.image === 'string') {
     plain.image = {
       url: plain.image || '',
       publicId: '',
+    };
+  } else if (typeof plain.image === 'object') {
+    plain.image = {
+      url: plain.image.url || '',
+      publicId: plain.image.publicId || plain.image.public_id || '',
     };
   }
   if (isList && plain.image?.url?.startsWith('data:')) {
@@ -70,99 +76,116 @@ const itemHasAnyActiveCategory = (item) => {
   return allCats.some((c) => c.active !== false);
 };
 
+// Active in-flight requests to eliminate cache stampedes under concurrent rushes
+const inflightMenuRequests = new Map();
+
 // @desc    Get all menu items
 // @route   GET /api/menu
 // @access  Public
 const getMenuItems = async (req, res) => {
+  const { category, search, availableOnly, featuredOnly, needsImage, activeCategoriesOnly } = req.query;
+  const cacheKey = `menu:${category || 'all'}:${search || ''}:${availableOnly || ''}:${featuredOnly || ''}:${needsImage || ''}:${activeCategoriesOnly || ''}`;
+
   try {
-    const { category, search, availableOnly, featuredOnly, needsImage, activeCategoriesOnly } = req.query;
-
-    // Cache key for identical queries
-    const cacheKey = `menu:${category || 'all'}:${search || ''}:${availableOnly || ''}:${featuredOnly || ''}:${needsImage || ''}:${activeCategoriesOnly || ''}`;
     const cachedData = cache.get(cacheKey);
-
     if (cachedData) {
       res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
       return res.json(cachedData);
     }
 
-    const andConditions = [
-      { $or: [{ variantParent: null }, { variantParent: { $exists: false } }] },
-    ];
-    let targetCategoryDoc = null;
+    if (inflightMenuRequests.has(cacheKey)) {
+      const coalescedData = await inflightMenuRequests.get(cacheKey);
+      res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      return res.json(coalescedData);
+    }
 
-    if (category && category !== 'all') {
-      if (mongoose.Types.ObjectId.isValid(category)) {
-        targetCategoryDoc = await Category.findById(category).lean();
-        if (!targetCategoryDoc) {
-          return res.json({ success: true, count: 0, data: [] });
-        }
-        andConditions.push({ $or: [{ category: targetCategoryDoc._id }, { categories: targetCategoryDoc._id }] });
-      } else {
-        targetCategoryDoc = await Category.findOne({ name: { $regex: new RegExp(`^${category}$`, 'i') } }).lean();
-        if (targetCategoryDoc) {
+    const fetchPromise = (async () => {
+      const andConditions = [
+        { $or: [{ variantParent: null }, { variantParent: { $exists: false } }] },
+      ];
+      let targetCategoryDoc = null;
+
+      if (category && category !== 'all') {
+        if (mongoose.Types.ObjectId.isValid(category)) {
+          targetCategoryDoc = await Category.findById(category).lean();
+          if (!targetCategoryDoc) {
+            return { success: true, count: 0, data: [] };
+          }
           andConditions.push({ $or: [{ category: targetCategoryDoc._id }, { categories: targetCategoryDoc._id }] });
         } else {
-          return res.json({ success: true, count: 0, data: [] });
+          targetCategoryDoc = await Category.findOne({ name: { $regex: new RegExp(`^${category}$`, 'i') } }).lean();
+          if (targetCategoryDoc) {
+            andConditions.push({ $or: [{ category: targetCategoryDoc._id }, { categories: targetCategoryDoc._id }] });
+          } else {
+            return { success: true, count: 0, data: [] };
+          }
         }
       }
+
+      if (activeCategoriesOnly === 'true' && targetCategoryDoc && targetCategoryDoc.active === false) {
+        return { success: true, count: 0, data: [] };
+      }
+
+      if (search && search.trim()) {
+        const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        andConditions.push({
+          $or: [
+            { name: { $regex: safeSearch, $options: 'i' } },
+            { description: { $regex: safeSearch, $options: 'i' } },
+          ],
+        });
+      }
+
+      const query = andConditions.length > 0 ? { $and: andConditions } : {};
+
+      if (availableOnly === 'true') {
+        query.available = true;
+      }
+
+      if (featuredOnly === 'true') {
+        query.featured = true;
+      }
+
+      if (needsImage === 'true') {
+        andConditions.push({
+          $or: [
+            { 'image.url': { $in: ['', null] } },
+            { image: { $in: ['', null] } },
+          ],
+        });
+        query.$and = andConditions;
+      }
+
+      const menuItems = await MenuItem.find(query)
+        .select('name category categories description price image emoji backgroundColor available featured preparationTime variants variantParent')
+        .populate('category', 'name active parcelEligible')
+        .populate('categories', 'name active parcelEligible')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      const filteredByCategoryStatus =
+        activeCategoriesOnly === 'true'
+          ? menuItems.filter((item) => itemHasAnyActiveCategory(item))
+          : menuItems;
+
+      const normalized = filteredByCategoryStatus.map((item) => normalizeMenuItemImage(item, true));
+      const responsePayload = { success: true, count: normalized.length, data: normalized };
+      cache.set(cacheKey, responsePayload, 45);
+      return responsePayload;
+    })();
+
+    inflightMenuRequests.set(cacheKey, fetchPromise);
+    let finalPayload;
+    try {
+      finalPayload = await fetchPromise;
+    } finally {
+      inflightMenuRequests.delete(cacheKey);
     }
-
-    if (activeCategoriesOnly === 'true' && targetCategoryDoc && targetCategoryDoc.active === false) {
-      return res.json({ success: true, count: 0, data: [] });
-    }
-
-    if (search && search.trim()) {
-      const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      andConditions.push({
-        $or: [
-          { name: { $regex: safeSearch, $options: 'i' } },
-          { description: { $regex: safeSearch, $options: 'i' } },
-        ],
-      });
-    }
-
-    const query = andConditions.length > 0 ? { $and: andConditions } : {};
-
-    if (availableOnly === 'true') {
-      query.available = true;
-    }
-
-    if (featuredOnly === 'true') {
-      query.featured = true;
-    }
-
-    if (needsImage === 'true') {
-      andConditions.push({
-        $or: [
-          { 'image.url': { $in: ['', null] } },
-          { image: { $in: ['', null] } },
-        ],
-      });
-      query.$and = andConditions;
-    }
-
-    const menuItems = await MenuItem.find(query)
-      .select('name category categories description price image emoji backgroundColor available featured preparationTime adminReviewNote variants variantParent createdAt')
-      .populate('category', 'name active parcelEligible')
-      .populate('categories', 'name active parcelEligible')
-      .sort({ createdAt: -1 })
-      .lean();
-
-    const filteredByCategoryStatus =
-      activeCategoriesOnly === 'true'
-        ? menuItems.filter((item) => itemHasAnyActiveCategory(item))
-        : menuItems;
-
-    const normalized = filteredByCategoryStatus.map((item) => normalizeMenuItemImage(item, true));
-    const responsePayload = { success: true, count: normalized.length, data: normalized };
-
-    // Cache list results for 45 seconds
-    cache.set(cacheKey, responsePayload, 45);
 
     res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
-    res.json(responsePayload);
+    return res.json(finalPayload);
   } catch (error) {
+    inflightMenuRequests.delete(cacheKey);
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
@@ -216,26 +239,26 @@ const checkMenuItems = async (req, res) => {
       return res.json({ success: true, data: [] });
     }
 
+    const cacheKey = `menu:check:${validIds.map(String).sort().join(',')}`;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const items = await MenuItem.find({ _id: { $in: validIds } })
-      .select('_id name available price variants variantParent category categories')
-      .populate('category', 'name active parcelEligible')
-      .populate('categories', 'name active parcelEligible')
+      .select('_id available price')
       .lean();
 
-    const checked = items.map((item) => {
-      const categoryInactive = !itemHasAnyActiveCategory(item);
-      return {
-        _id: item._id,
-        name: item.name,
-        available: categoryInactive ? false : item.available,
-        price: item.price,
-        variants: Array.isArray(item.variants) ? item.variants : [],
-        categoryInactive,
-        parcelEligible: isItemParcelEligible(item),
-      };
-    });
+    const checked = items.map((item) => ({
+      _id: item._id,
+      available: Boolean(item.available),
+      price: item.price,
+    }));
 
-    res.json({ success: true, data: checked });
+    const responsePayload = { success: true, data: checked };
+    cache.set(cacheKey, responsePayload, 15);
+
+    res.json(responsePayload);
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
@@ -359,6 +382,14 @@ const createMenuItem = async (req, res) => {
     // Determine category name for organized Cloudinary folder hierarchy
     const folderName = catDoc.name ? catDoc.name.toLowerCase().trim() : 'general';
 
+    // Base64 data-URI images must never be stored in MongoDB
+    if (imageUrl && typeof imageUrl === 'string' && imageUrl.startsWith('data:')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Base64 data-URI images are not allowed. Please upload an image file directly to Cloudinary.',
+      });
+    }
+
     let imageData = {
       url: imageUrl || '',
       publicId: imagePublicId || '',
@@ -366,19 +397,18 @@ const createMenuItem = async (req, res) => {
 
     // If file was directly attached via multipart form
     if (req.file) {
-      if (isCloudinaryConfigured()) {
-        const uploadResult = await uploadToCloudinary(req.file.buffer, { folder: folderName });
-        imageData = {
-          url: uploadResult.url,
-          publicId: uploadResult.publicId,
-        };
-        uploadedPublicId = uploadResult.publicId;
-      } else {
-        return res.status(500).json({
+      if (!isCloudinaryConfigured()) {
+        return res.status(400).json({
           success: false,
-          message: 'Cloudinary is not configured. Please configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
+          message: 'Cloudinary credentials are not configured on the server. Image uploads are disabled.',
         });
       }
+      const uploadResult = await uploadToCloudinary(req.file.buffer, { folder: folderName });
+      imageData = {
+        url: uploadResult.url,
+        publicId: uploadResult.publicId,
+      };
+      uploadedPublicId = uploadResult.publicId;
     }
 
     let menuItem;
@@ -491,15 +521,21 @@ const updateMenuItem = async (req, res) => {
           publicId: uploadResult.publicId,
         };
       } else {
-        return res.status(500).json({
+        return res.status(400).json({
           success: false,
-          message: 'Cloudinary is not configured. Please configure CLOUDINARY credentials in environment variables.',
+          message: 'Cloudinary credentials are not configured on the server. Image uploads are disabled.',
         });
       }
     } else if (removeImage === 'true' || removeImage === true) {
       // Scenario C: Admin explicitly removed the image
       imageData = { url: '', publicId: '' };
     } else if (imageUrl !== undefined) {
+      if (typeof imageUrl === 'string' && imageUrl.startsWith('data:')) {
+        return res.status(400).json({
+          success: false,
+          message: 'Base64 data-URI images are not allowed. Please upload an image file directly to Cloudinary.',
+        });
+      }
       // If image URL / publicId passed via upload-image workflow
       imageData = {
         url: imageUrl,

@@ -20,10 +20,12 @@ const getAnalyticsOverview = async (req, res) => {
     const [stats, statusCounts, todayStats] = await Promise.all([
       Order.aggregate([
         {
+          $match: { status: { $ne: 'Cancelled' } },
+        },
+        {
           $group: {
             _id: null,
             totalRevenue: { $sum: '$total' },
-            totalOrders: { $sum: 1 },
           },
         },
       ]),
@@ -56,7 +58,7 @@ const getAnalyticsOverview = async (req, res) => {
     ]);
 
     const revenue = stats.length > 0 ? stats[0].totalRevenue : 0;
-    const ordersCount = stats.length > 0 ? stats[0].totalOrders : 0;
+    const ordersCount = statusCounts.reduce((acc, curr) => acc + (curr.count || 0), 0);
     const todayRevenue = todayStats.length > 0 ? todayStats[0].todayRevenue : 0;
     const todayOrders = todayStats.length > 0 ? todayStats[0].todayOrders : 0;
 
@@ -169,6 +171,11 @@ const getPaymentMethodStats = async (req, res) => {
     }
 
     const paymentMethods = await Order.aggregate([
+      {
+        $match: {
+          status: { $ne: 'Cancelled' },
+        },
+      },
       {
         $group: {
           _id: '$paymentMethod',

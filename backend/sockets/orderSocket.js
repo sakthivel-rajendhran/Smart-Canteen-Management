@@ -41,7 +41,7 @@ const configureSockets = (io) => {
       console.log(`🔒 Authenticated Socket ${socket.id} (${socket.user.name}) automatically joined room: ${userRoom}`);
 
       // If administrator, automatically join 'admin' room
-      if (userRole === 'admin') {
+      if (userRole?.toLowerCase() === 'admin') {
         socket.join('admin');
         console.log(`🛡️ Admin Socket ${socket.id} automatically joined room: admin`);
       }
@@ -63,7 +63,7 @@ const configureSockets = (io) => {
         socket.join(room);
         console.log(`Socket ${socket.id} verified and joined: ${room}`);
       } else if (room === 'admin') {
-        if (!socket.user || socket.user.role !== 'admin') {
+        if (!socket.user || socket.user.role?.toLowerCase() !== 'admin') {
           console.warn(`⛔ Unauthorized admin room join attempt by socket ${socket.id}`);
           return socket.emit('error:unauthorized', { message: 'Admin access required for room admin' });
         }

@@ -37,33 +37,53 @@ const attachItemCounts = async (categories) => {
   });
 };
 
+// Active in-flight requests to eliminate cache stampedes under concurrent rushes
+const inflightCategoryRequests = new Map();
+
 // @desc    Get categories (active by default, or all with ?all=true)
 // @route   GET /api/categories
 // @access  Public
 const getCategories = async (req, res) => {
-  try {
-    const isAll = req.query.all === 'true';
-    const cacheKey = `categories:${isAll ? 'all' : 'active'}`;
-    const cached = cache.get(cacheKey);
+  const isAll = req.query.all === 'true';
+  const cacheKey = `categories:${isAll ? 'all' : 'active'}`;
 
+  try {
+    const cached = cache.get(cacheKey);
     if (cached) {
       res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
       return res.json(cached);
     }
 
-    const filter = isAll ? {} : { active: { $ne: false } };
-    const categories = await Category.find(filter)
-      .select('name active parcelEligible createdAt updatedAt')
-      .sort({ name: 1 })
-      .lean();
-    const enrichedCategories = await attachItemCounts(categories);
-    const responsePayload = { success: true, data: enrichedCategories };
+    if (inflightCategoryRequests.has(cacheKey)) {
+      const coalescedData = await inflightCategoryRequests.get(cacheKey);
+      res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      return res.json(coalescedData);
+    }
 
-    cache.set(cacheKey, responsePayload, 60);
+    const fetchPromise = (async () => {
+      const filter = isAll ? {} : { active: { $ne: false } };
+      const categories = await Category.find(filter)
+        .select('name active parcelEligible createdAt updatedAt')
+        .sort({ name: 1 })
+        .lean();
+      const enrichedCategories = await attachItemCounts(categories);
+      const responsePayload = { success: true, data: enrichedCategories };
+      cache.set(cacheKey, responsePayload, 60);
+      return responsePayload;
+    })();
+
+    inflightCategoryRequests.set(cacheKey, fetchPromise);
+    let finalPayload;
+    try {
+      finalPayload = await fetchPromise;
+    } finally {
+      inflightCategoryRequests.delete(cacheKey);
+    }
 
     res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
-    res.json(responsePayload);
+    return res.json(finalPayload);
   } catch (error) {
+    inflightCategoryRequests.delete(cacheKey);
     res.status(500).json({ success: false, message: error.message });
   }
 };

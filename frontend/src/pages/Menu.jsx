@@ -23,6 +23,10 @@ import {
   CheckCircle2,
   Filter,
   X,
+  MapPin,
+  Phone,
+  RefreshCw,
+  WifiOff,
 } from 'lucide-react';
 
 const Menu = () => {
@@ -379,17 +383,42 @@ const Menu = () => {
         {loading ? (
           <MenuSkeleton count={8} />
         ) : error ? (
-          <div className="text-center py-20 bg-white border border-border rounded-3xl p-6 max-w-lg mx-auto shadow-sm">
-            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <div className="text-center py-16 bg-white border border-border rounded-3xl p-6 sm:p-8 max-w-lg mx-auto shadow-sm">
+            <div className="w-14 h-14 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-200">
+              <WifiOff className="w-7 h-7 text-amber-600" />
+            </div>
             <h3 className="font-outfit font-bold text-xl text-primary-dark mb-1">
-              Failed to Load Menu
+              Unable to Connect to Canteen Server
             </h3>
-            <p className="text-muted text-sm mb-6 leading-relaxed">{error}</p>
+            <p className="text-muted text-xs sm:text-sm mb-6 leading-relaxed">
+              {error || 'The server may be waking up from sleep mode, or your internet is offline.'}
+            </p>
+
+            {/* Offline Canteen Info Card */}
+            <div className="bg-cream/60 border border-border rounded-2xl p-4 text-left mb-6 space-y-2.5">
+              <div className="flex items-start gap-2.5">
+                <MapPin className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <span className="text-[11px] font-bold text-primary-dark block">Counter Location</span>
+                  <span className="text-xs text-muted">Canteen Ground Floor, Near Main Auditorium</span>
+                </div>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <Phone className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <span className="text-[11px] font-bold text-primary-dark block">Canteen Counter Intercom / Helpline</span>
+                  <a href="tel:+919876543210" className="text-xs text-primary font-bold hover:underline">
+                    +91 98765 43210 (Intercom: #204)
+                  </a>
+                </div>
+              </div>
+            </div>
+
             <button
               onClick={fetchData}
-              className="bg-primary-dark text-white font-bold px-7 py-3 rounded-xl hover:bg-primary transition-all shadow-md active:scale-95"
+              className="bg-primary-dark hover:bg-primary text-white font-bold px-7 py-3 rounded-xl transition-all shadow-md active:scale-95 inline-flex items-center gap-2 text-xs uppercase tracking-wider"
             >
-              Retry Connection
+              <RefreshCw className="w-3.5 h-3.5" /> Retry Connection
             </button>
           </div>
         ) : filteredItems.length === 0 ? (

@@ -20,9 +20,22 @@ export default defineConfig({
             return 'vendor-charts';
           }
           if (
+            id.includes('jspdf') ||
+            id.includes('pdfkit') ||
+            id.includes('html2pdf') ||
+            id.includes('html2canvas')
+          ) {
+            return 'vendor-pdf';
+          }
+          if (
             id.includes('react-router') ||
+            id.includes('react-router-dom') ||
             id.includes('/react/') ||
+            id.includes('\\react\\') ||
             id.includes('/react-dom/') ||
+            id.includes('\\react-dom\\') ||
+            id.includes('/react-is/') ||
+            id.includes('\\react-is\\') ||
             id.includes('scheduler')
           ) {
             return 'vendor-react';

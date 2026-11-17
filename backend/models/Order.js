@@ -23,6 +23,12 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    // Optional client request ID for checkout idempotency
+    clientRequestId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     // User is required for ONLINE orders, but optional for WALK_IN counter orders
     user: {
       type: mongoose.Schema.Types.ObjectId,
@@ -185,6 +191,8 @@ const orderSchema = new mongoose.Schema(
 // Compound indexes for user orders, live feeds, archive queries, and date ranges
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ user: 1, status: 1 });
+orderSchema.index({ user: 1, clientRequestId: 1 }, { unique: true, sparse: true });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ orderType: 1, createdAt: -1 });
 orderSchema.index({ status: 1, completedAt: -1 });

@@ -43,14 +43,45 @@ const buildOrderQuery = (rawId) => {
 // @route   POST /api/orders
 // @access  Private
 const createOrder = async (req, res) => {
+  let appliedCouponCode = '';
+
   try {
-    const { items, couponCode, paymentMethod, paymentId } = req.body;
+    const { items, couponCode, paymentMethod, paymentId, clientRequestId } = req.body;
 
     if (!items || items.length === 0) {
       return res.status(400).json({ success: false, message: 'No items in order' });
     }
 
-    // 1. Batch verify items from database in a single query
+    // 1. Idempotency Check: if clientRequestId is provided and order exists, return existing order
+    if (clientRequestId && typeof clientRequestId === 'string' && clientRequestId.trim()) {
+      const existingOrder = await Order.findOne({
+        user: req.user._id,
+        clientRequestId: clientRequestId.trim(),
+      }).lean();
+
+      if (existingOrder) {
+        return res.status(200).json({
+          success: true,
+          message: 'Order already placed (idempotent)',
+          data: existingOrder,
+        });
+      }
+    }
+
+    // 2. Active Orders Limit: maximum 3 active orders per student
+    const activeOrderCount = await Order.countDocuments({
+      user: req.user._id,
+      status: { $in: ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Pickup Bill'] },
+    });
+
+    if (activeOrderCount >= 3) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have reached the maximum limit of 3 active orders. Please wait until your previous orders are completed before placing a new one.',
+      });
+    }
+
+    // 3. Batch verify items from database in a single query
     const itemIds = items
       .map((item) => item?.menuItem)
       .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
@@ -159,9 +190,8 @@ const createOrder = async (req, res) => {
     subtotal = Number(subtotal.toFixed(2));
     parcelChargeTotal = Number(parcelChargeTotal.toFixed(2));
 
-    // 2. Validate coupon discount (enforcing Admin global setting and coupon rules on backend)
+    // 4. Validate and Claim Coupon Atomically with findOneAndUpdate
     let discount = 0;
-    let appliedCouponCode = '';
     if (couponCode && String(couponCode).trim()) {
       const globalEnabled = await isGlobalCouponsEnabled();
       if (!globalEnabled) {
@@ -172,51 +202,113 @@ const createOrder = async (req, res) => {
       }
 
       const cleanCode = String(couponCode).trim().toUpperCase();
-      const coupon = await Coupon.findOne({ code: cleanCode, active: true });
-      const withinUsageLimit = coupon && (coupon.usageLimit === 0 || coupon.usedCount < coupon.usageLimit);
+      const now = new Date();
 
-      if (coupon && withinUsageLimit && new Date(coupon.expiryDate) > new Date() && subtotal >= coupon.minimumOrder) {
-        if (coupon.discountType === 'flat') {
-          discount = coupon.discountValue;
-        } else if (coupon.discountType === 'percentage') {
-          discount = (subtotal * coupon.discountValue) / 100;
-          if (coupon.maxDiscount > 0 && discount > coupon.maxDiscount) {
-            discount = coupon.maxDiscount;
-          }
-        }
-        discount = Math.min(subtotal, discount);
-        appliedCouponCode = coupon.code;
+      const claimedCoupon = await Coupon.findOneAndUpdate(
+        {
+          code: cleanCode,
+          active: true,
+          expiryDate: { $gt: now },
+          minimumOrder: { $lte: subtotal },
+          $or: [
+            { usageLimit: 0 },
+            { $expr: { $lt: ['$usedCount', '$usageLimit'] } },
+          ],
+        },
+        { $inc: { usedCount: 1 } },
+        { new: true }
+      );
 
-        // Increment coupon usage
-        coupon.usedCount += 1;
-        await coupon.save();
+      if (!claimedCoupon) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid, expired, minimum order not met, or fully redeemed coupon code.',
+        });
       }
+
+      if (claimedCoupon.discountType === 'flat') {
+        discount = claimedCoupon.discountValue;
+      } else if (claimedCoupon.discountType === 'percentage') {
+        discount = (subtotal * claimedCoupon.discountValue) / 100;
+        if (claimedCoupon.maxDiscount > 0 && discount > claimedCoupon.maxDiscount) {
+          discount = claimedCoupon.maxDiscount;
+        }
+      }
+      discount = Math.min(subtotal, Number(discount.toFixed(2)));
+      appliedCouponCode = claimedCoupon.code;
     }
 
     const total = Math.max(0, Number((subtotal + parcelChargeTotal - discount).toFixed(2)));
-    const orderCode = await generateOrderCode();
-    const pickupToken = orderCode; // Consistent DRS-XXXX format
-    const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
 
-    const order = await Order.create({
-      orderCode,
-      orderType: 'ONLINE',
-      pickupToken,
-      pickupSecret,
-      user: req.user._id,
-      items: verifiedItems,
-      foodSubtotal: subtotal,
-      parcelChargeTotal,
-      subtotal,
-      discount,
-      total,
-      coupon: appliedCouponCode,
-      paymentMethod,
-      paymentStatus: paymentMethod === 'cod' ? 'cod' : 'pending',
-      paymentId: paymentId || '',
-      status: 'Placed',
-      statusTimestamps: { Placed: new Date() },
-    });
+    // 5. Order Creation with up to 5 retries on duplicate orderCode (no endless loops)
+    let order = null;
+    let attempts = 0;
+    const maxAttempts = 5;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      const orderCode = generateOrderCode();
+      const pickupToken = orderCode;
+      const pickupSecret = `sec_${crypto.randomBytes(6).toString('hex')}`;
+
+      try {
+        order = await Order.create({
+          orderCode,
+          orderType: 'ONLINE',
+          pickupToken,
+          pickupSecret,
+          clientRequestId: (clientRequestId && typeof clientRequestId === 'string' && clientRequestId.trim()) ? clientRequestId.trim() : null,
+          user: req.user._id,
+          items: verifiedItems,
+          foodSubtotal: subtotal,
+          parcelChargeTotal,
+          subtotal,
+          discount,
+          total,
+          coupon: appliedCouponCode,
+          paymentMethod,
+          paymentStatus: paymentMethod === 'cod' ? 'cod' : 'pending',
+          paymentId: paymentId || '',
+          status: 'Placed',
+          statusTimestamps: { Placed: new Date() },
+        });
+        break; // Successfully created
+      } catch (err) {
+        if (err.code === 11000) {
+          // If collision was on clientRequestId, another concurrent request placed this order
+          if (err.keyPattern?.clientRequestId) {
+            if (appliedCouponCode) {
+              await Coupon.updateOne({ code: appliedCouponCode }, { $inc: { usedCount: -1 } });
+            }
+            const existing = await Order.findOne({ user: req.user._id, clientRequestId: clientRequestId.trim() }).lean();
+            if (existing) {
+              return res.status(200).json({
+                success: true,
+                message: 'Order already placed (idempotent)',
+                data: existing,
+              });
+            }
+          }
+          // If collision was on orderCode, retry up to 5 attempts
+          if (attempts >= maxAttempts) {
+            if (appliedCouponCode) {
+              await Coupon.updateOne({ code: appliedCouponCode }, { $inc: { usedCount: -1 } });
+            }
+            return res.status(500).json({
+              success: false,
+              message: 'Failed to generate a unique order code after 5 attempts. Please try again.',
+            });
+          }
+          continue;
+        }
+
+        // On other error: roll back coupon count and propagate
+        if (appliedCouponCode) {
+          await Coupon.updateOne({ code: appliedCouponCode }, { $inc: { usedCount: -1 } });
+        }
+        throw err;
+      }
+    }
 
     // Send HTTP response immediately (non-blocking)
     res.status(201).json({
@@ -248,8 +340,7 @@ const createOrder = async (req, res) => {
         io.to('admin').emit('order:created', populatedOrder);
 
         // Smart Notification Rule:
-        // Do NOT send customer notification on Order Placed (only ONE notification is sent when order reaches Pickup Bill).
-        // Admin notification: New Order Received (idempotent, single notification per admin)
+        // Admin notification: New Order Received (bulk insert, single notification per admin)
         await createAndEmitAdminNotification(io, {
           title: '🔔 New Order Placed',
           message: `New order #${order.orderCode} received from ${req.user.name || 'Customer'} (₹${order.total})`,
@@ -281,34 +372,29 @@ const getMyOrders = async (req, res) => {
   try {
     const { page, limit } = req.query;
 
-    if (page || limit) {
-      const pageNum = Math.max(1, parseInt(page, 10) || 1);
-      const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
-      const skip = (pageNum - 1) * limitNum;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 50));
+    const skip = (pageNum - 1) * limitNum;
 
-      const [orders, total] = await Promise.all([
-        Order.find({ user: req.user._id })
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limitNum)
-          .lean(),
-        Order.countDocuments({ user: req.user._id }),
-      ]);
+    const [orders, total] = await Promise.all([
+      Order.find({ user: req.user._id })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      Order.countDocuments({ user: req.user._id }),
+    ]);
 
-      return res.json({
-        success: true,
-        data: orders,
-        pagination: {
-          page: pageNum,
-          limit: limitNum,
-          totalPages: Math.ceil(total / limitNum) || 1,
-          total,
-        },
-      });
-    }
-
-    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
-    res.json({ success: true, data: orders });
+    res.json({
+      success: true,
+      data: orders,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum) || 1,
+        total,
+      },
+    });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
@@ -348,19 +434,27 @@ const getOrderById = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const validStatuses = [
-      'Placed',
-      'Confirmed',
-      'Preparing',
-      'Ready',
-      'Pickup Bill',
-      'Handover Bill',
-      'Completed',
-      'Cancelled',
-    ];
+    
+    // Allowed transitions mapping:
+    // Placed > Confirmed | Cancelled
+    // Confirmed > Preparing | Cancelled
+    // Preparing > Ready | Cancelled
+    // Ready > Completed | Pickup Bill | Cancelled
+    // Pickup Bill > Handover Bill | Completed | Cancelled
+    // Handover Bill > Completed
+    const VALID_PREDECESSORS = {
+      Confirmed: ['Placed'],
+      Preparing: ['Confirmed'],
+      Ready: ['Preparing'],
+      'Pickup Bill': ['Ready'],
+      'Handover Bill': ['Pickup Bill'],
+      Completed: ['Ready', 'Pickup Bill', 'Handover Bill'],
+      Cancelled: ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Pickup Bill'],
+    };
 
-    if (!status || !validStatuses.includes(status)) {
-      return res.status(400).json({ success: false, message: 'Invalid status value' });
+    const validPredecessors = VALID_PREDECESSORS[status];
+    if (!validPredecessors) {
+      return res.status(400).json({ success: false, message: `Invalid status transition target: "${status}"` });
     }
 
     const query = buildOrderQuery(req.params.id);
@@ -368,49 +462,58 @@ const updateOrderStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    const order = await Order.findOne(query).populate('user', 'name email phone role accountType studentDetails staffDetails');
+    const now = new Date();
+    const updateFields = {
+      status,
+      [`statusTimestamps.${status}`]: now,
+    };
 
-    if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found' });
+    if (status === 'Completed' || status === 'Handover Bill') {
+      updateFields.paymentStatus = 'paid';
+      updateFields.handoverVerified = true;
+      updateFields.completedAt = now;
+      updateFields.handoverVerifiedAt = now;
+      updateFields.handoverVerifiedBy = req.user._id;
+      updateFields[`statusTimestamps.Completed`] = now;
+      updateFields[`statusTimestamps.Handover Bill`] = now;
     }
 
-    // Section 25: Duplicate notification prevention
-    if (order.status === status) {
-      return res.json({
-        success: true,
-        message: `Order status is already ${status}`,
-        data: order,
+    // Atomic conditional update: only matches if current status is in valid predecessors
+    const order = await Order.findOneAndUpdate(
+      {
+        ...query,
+        status: { $in: validPredecessors },
+      },
+      { $set: updateFields },
+      { new: true }
+    ).populate('user', 'name email phone role accountType studentDetails staffDetails');
+
+    if (!order) {
+      const existing = await Order.findOne(query);
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Order not found' });
+      }
+      if (existing.status === status) {
+        return res.json({
+          success: true,
+          message: `Order status is already ${status}`,
+          data: existing,
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status transition: Order #${existing.orderCode} cannot transition from "${existing.status}" to "${status}". Another admin may have already updated it.`,
       });
     }
 
-    order.status = status;
-    const now = new Date();
-    if (!order.statusTimestamps) {
-      order.statusTimestamps = new Map();
+    // Decrement coupon usage on cancel
+    if (status === 'Cancelled' && order.coupon) {
+      await Coupon.updateOne({ code: order.coupon }, { $inc: { usedCount: -1 } });
     }
-    if (!order.statusTimestamps.get('Placed') && order.createdAt) {
-      order.statusTimestamps.set('Placed', order.createdAt);
-    }
-    order.statusTimestamps.set(status, now);
-
-    // Handle payment auto-settlement and handover stamping for Handover Bill / Completed
-    if (status === 'Completed' || status === 'Handover Bill') {
-      if (order.paymentMethod === 'cod' || order.paymentStatus === 'pending') {
-        order.paymentStatus = 'paid';
-      }
-      order.handoverVerified = true;
-      order.completedAt = order.completedAt || now;
-      order.handoverVerifiedAt = order.handoverVerifiedAt || now;
-      order.handoverVerifiedBy = req.user._id;
-      order.statusTimestamps.set('Handover Bill', order.statusTimestamps.get('Handover Bill') || now);
-      order.statusTimestamps.set('Completed', order.statusTimestamps.get('Completed') || now);
-    }
-
-    await order.save();
 
     const io = req.app.get('socketio');
     if (io) {
-      // 1. REAL-TIME TRACKING EVENT: Broadcast every status change to customer tracking
+      // 1. Send ONLY to user's private room
       if (order.user) {
         io.to(`user:${order.user._id}`).emit('order:statusChanged', {
           orderId: order._id,
@@ -422,27 +525,14 @@ const updateOrderStatus = async (req, res) => {
         });
       }
 
-      // 2. REAL-TIME ORDER STATUS EVENT: Broadcast to admin order management
+      // 2. Send ONLY to admin room
       io.to('admin').emit('order:updated', order);
 
-      // 3. Broadcast live ready tokens change to public counter display
-      io.emit('pickup:readyTokensChanged', {
-        orderId: order._id,
-        orderCode: order.orderCode,
-        pickupToken: order.pickupToken || order.orderCode,
-        status: order.status,
-        readyAt: order.updatedAt,
-      });
-
-      // 4. SMART NOTIFICATION RULE:
-      // Send only ONE customer notification when an order reaches 'Pickup Bill'.
-      // All other status changes (Placed, Confirmed, Preparing, Ready, Handover Bill, Completed)
-      // update tracking timelines in real time without sending customer notifications.
+      // 3. Smart Notification: single customer notification when order reaches Pickup Bill
       if (status === 'Pickup Bill' && order.user && !order.pickupBillNotificationSent) {
         order.pickupBillNotificationSent = true;
         order.pickupBillNotifiedAt = new Date();
-        
-        // Atomic DB safeguard to prevent duplicates from concurrent API calls or refreshes
+
         await Order.updateOne(
           { _id: order._id, pickupBillNotificationSent: { $ne: true } },
           { $set: { pickupBillNotificationSent: true, pickupBillNotifiedAt: new Date() } }
@@ -490,36 +580,54 @@ const cancelOrder = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    const order = await Order.findOne(query);
+    // Verify ownership first if not admin
+    if (req.user.role !== 'admin' && req.user.role !== 'ADMIN') {
+      const existing = await Order.findOne(query).select('user status orderCode coupon');
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Order not found' });
+      }
+      const orderUserId = existing.user?._id ? existing.user._id.toString() : existing.user?.toString();
+      if (orderUserId && orderUserId !== req.user._id.toString()) {
+        return res.status(403).json({ success: false, message: 'Not authorized to cancel this order' });
+      }
+    }
+
+    const cancellableStatuses = (req.user.role === 'admin' || req.user.role === 'ADMIN')
+      ? ['Placed', 'Confirmed', 'Preparing', 'Ready', 'Pickup Bill']
+      : ['Placed', 'Confirmed'];
+
+    const order = await Order.findOneAndUpdate(
+      {
+        ...query,
+        status: { $in: cancellableStatuses },
+      },
+      {
+        $set: {
+          status: 'Cancelled',
+          [`statusTimestamps.Cancelled`]: new Date(),
+        },
+      },
+      { new: true }
+    );
 
     if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found' });
-    }
-
-    // Verify ownership
-    const orderUserId = order.user?._id ? order.user._id.toString() : order.user?.toString();
-    if (orderUserId && orderUserId !== req.user._id.toString() && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Not authorized to cancel this order' });
-    }
-
-    // Prevent duplicate cancellation
-    if (order.status === 'Cancelled') {
-      return res.json({ success: true, message: 'Order is already cancelled', data: order });
-    }
-
-    // Validate cancellation stage
-    if (order.status !== 'Placed' && order.status !== 'Confirmed' && req.user.role !== 'admin') {
+      const existing = await Order.findOne(query);
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Order not found' });
+      }
+      if (existing.status === 'Cancelled') {
+        return res.json({ success: true, message: 'Order is already cancelled', data: existing });
+      }
       return res.status(400).json({
         success: false,
-        message: 'Order cannot be cancelled as prep is already in progress'
+        message: 'Order cannot be cancelled as preparation is already in progress or completed.',
       });
     }
 
-    order.status = 'Cancelled';
-    if (order.paymentStatus === 'pending') {
-      order.paymentStatus = 'failed';
+    // Decrement coupon count on cancel
+    if (order.coupon) {
+      await Coupon.updateOne({ code: order.coupon }, { $inc: { usedCount: -1 } });
     }
-    await order.save();
 
     const io = req.app.get('socketio');
     if (io) {
@@ -538,7 +646,7 @@ const cancelOrder = async (req, res) => {
         },
       });
 
-      // 2. If student cancelled, notify admins idempotently
+      // 2. If student cancelled, notify admins idempotently via bulk insert
       if (cancelledByRole === 'Student') {
         await createAndEmitAdminNotification(io, {
           title: '⚠ Order Cancelled',
@@ -555,19 +663,12 @@ const cancelOrder = async (req, res) => {
         });
       }
 
+      // Targeted socket emits only
       io.to(`user:${order.user}`).emit('order:statusChanged', {
         orderId: order._id,
         orderCode: order.orderCode,
         status: 'Cancelled',
         paymentStatus: order.paymentStatus
-      });
-
-      // Broadcast update to counter display in case a ready order was cancelled
-      io.emit('pickup:readyTokensChanged', {
-        orderId: order._id,
-        orderCode: order.orderCode,
-        pickupToken: order.pickupToken || order.orderCode,
-        status: 'Cancelled',
       });
       io.to('admin').emit('order:updated', order);
     }
@@ -590,17 +691,19 @@ const getAdminOrders = async (req, res) => {
       query.status = status;
     }
 
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 20;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     const skipNum = (pageNum - 1) * limitNum;
 
-    const orders = await Order.find(query)
-      .populate('user', 'name email phone role accountType studentDetails staffDetails')
-      .sort({ createdAt: -1 })
-      .skip(skipNum)
-      .limit(limitNum);
-
-    const totalOrders = await Order.countDocuments(query);
+    const [orders, totalOrders] = await Promise.all([
+      Order.find(query)
+        .populate('user', 'name email phone role accountType studentDetails staffDetails')
+        .sort({ createdAt: -1 })
+        .skip(skipNum)
+        .limit(limitNum)
+        .lean(),
+      Order.countDocuments(query),
+    ]);
 
     res.json({
       success: true,
@@ -608,8 +711,8 @@ const getAdminOrders = async (req, res) => {
       pagination: {
         total: totalOrders,
         page: pageNum,
-        pages: Math.ceil(totalOrders / limitNum),
-      }
+        pages: Math.ceil(totalOrders / limitNum) || 1,
+      },
     });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
