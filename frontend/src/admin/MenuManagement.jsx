@@ -81,6 +81,7 @@ const MenuManagement = () => {
   const [formImagePreview, setFormImagePreview] = useState(null);
   const [formRemoveImage, setFormRemoveImage] = useState(false);
   const [formVariants, setFormVariants] = useState([]);
+  const [formParcelEnabled, setFormParcelEnabled] = useState(false);
   const [formValidationMsg, setFormValidationMsg] = useState('');
   const [formLoading, setFormLoading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState('');
@@ -282,6 +283,7 @@ const MenuManagement = () => {
     setFormImagePreview(null);
     setFormRemoveImage(false);
     setFormVariants([]);
+    setFormParcelEnabled(false);
     setUploadProgressText('');
     setFormValidationMsg('');
   };
@@ -291,6 +293,7 @@ const MenuManagement = () => {
     if (activeCategories.length > 0) {
       setFormCategory(activeCategories[0]._id);
     }
+    setFormParcelEnabled(false);
     setIsAddModalOpen(true);
   };
 
@@ -308,6 +311,15 @@ const MenuManagement = () => {
     setFormPreparationTime(item.preparationTime || 10);
     setFormFeatured(Boolean(item.featured));
     setFormAvailable(item.available !== false);
+
+    // Resolve saved parcel availability (Snacks permanently false; Food & Juices admin controlled)
+    const isItemEnabled = Boolean(item.parcelEligible === true || item.parcelEnabled === true);
+    const primaryCatName = item.category?.name || '';
+    const extraCatNames = getItemCategories(item).map((c) => c.name || '');
+    const allCatNames = [primaryCatName, ...extraCatNames].map((n) => n.trim().toLowerCase());
+    const isSnacks = allCatNames.includes('snacks');
+    setFormParcelEnabled(!isSnacks && isItemEnabled);
+
     setFormImageFile(null);
     setFormRemoveImage(false);
     setFormVariants(
@@ -358,6 +370,13 @@ const MenuManagement = () => {
     };
   }, [categories, formCategory, formAdditionalCategories]);
 
+  // If category switches to Snacks, automatically turn off Parcel service
+  useEffect(() => {
+    if (formCategoryStatus.isSnacks && formParcelEnabled) {
+      setFormParcelEnabled(false);
+    }
+  }, [formCategoryStatus.isSnacks, formParcelEnabled]);
+
   // Submit Add Food
   const handleAddFood = async (e) => {
     e.preventDefault();
@@ -377,6 +396,8 @@ const MenuManagement = () => {
       formData.append('preparationTime', formPreparationTime);
       formData.append('featured', formFeatured);
       formData.append('available', formAvailable);
+      formData.append('parcelEligible', formParcelEnabled);
+      formData.append('parcelEnabled', formParcelEnabled);
       if (formVariants.length > 0) {
         formData.append('variants', JSON.stringify(formVariants));
       }
@@ -421,6 +442,8 @@ const MenuManagement = () => {
       formData.append('preparationTime', formPreparationTime);
       formData.append('featured', formFeatured);
       formData.append('available', formAvailable);
+      formData.append('parcelEligible', formParcelEnabled);
+      formData.append('parcelEnabled', formParcelEnabled);
       if (formVariants.length > 0) {
         formData.append('variants', JSON.stringify(formVariants));
       }
@@ -1211,91 +1234,135 @@ const MenuManagement = () => {
               )}
 
               {/* Category-Based Service Options & Parcel Packaging */}
-              {formCategoryStatus.isSnacks ? (
-                /* Snacks Category: Normal Only (No parcel configuration controls) */
-                <div className="bg-stone-50 border border-stone-200/90 rounded-2xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
-                      <Package className="w-3.5 h-3.5 text-stone-500" /> Service Options & Packaging
+              <div className="bg-stone-50 border border-stone-200/90 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-stone-800 flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-stone-600" /> Service Options & Packaging
+                  </span>
+                  {formCategoryStatus.isSnacks ? (
+                    <span className="bg-stone-200 text-stone-700 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
+                      Normal Service Only (Snacks)
                     </span>
-                    <span className="bg-stone-200 text-stone-800 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
-                      Normal Service Only
+                  ) : (
+                    <span
+                      className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase border ${
+                        formParcelEnabled && parcelSettings.parcelEnabled
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : formParcelEnabled && !parcelSettings.parcelEnabled
+                          ? 'bg-amber-100 text-amber-900 border-amber-300'
+                          : 'bg-stone-200 text-stone-700 border-stone-300'
+                      }`}
+                    >
+                      {formParcelEnabled
+                        ? parcelSettings.parcelEnabled
+                          ? `✓ Parcel Active (+₹${parcelSettings.parcelChargePerItem})`
+                          : 'Parcel Enabled (Global Parcel OFF)'
+                        : 'Normal Only'}
                     </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-white border border-stone-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Normal Service: Always Available */}
+                  <div className="bg-white border border-stone-200 p-3 rounded-xl text-xs flex items-center justify-between shadow-2xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
                       <div>
                         <span className="font-bold text-stone-900 block leading-tight">Normal Service</span>
-                        <span className="text-[10px] text-stone-500">Available (Counter / Dine-in)</span>
+                        <span className="text-[10px] text-stone-500">Always Available — ₹0 Parcel Fee</span>
                       </div>
                     </div>
-                    <div className="bg-stone-100/80 border border-stone-200/70 p-2.5 rounded-xl text-xs flex items-center gap-2 opacity-60">
-                      <div className="w-2 h-2 rounded-full bg-stone-400" />
-                      <div>
-                        <span className="font-bold text-stone-600 block leading-tight">Parcel Service</span>
-                        <span className="text-[10px] text-stone-500">Disabled for Snacks</span>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-stone-500 font-medium leading-relaxed">
-                    ℹ️ <strong>Category Rule:</strong> Snacks are strictly Normal service only. Parcel packaging is never offered for Snacks.
-                  </p>
-                  {editingItem && (editingItem.category?.name || '').trim().toLowerCase() !== 'snacks' && (
-                    <div className="bg-amber-100 border border-amber-300 text-amber-950 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
-                      <span>Category changed to Snacks: Parcel packaging will become unavailable for this item upon saving.</span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* Food Items / Juices Category: Normal & Parcel Available */
-                <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-2xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
-                      <Package className="w-3.5 h-3.5 text-emerald-700" /> Service Options & Packaging
-                    </span>
-                    <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase border ${
-                      parcelSettings.parcelEnabled
-                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                        : 'bg-amber-100 text-amber-900 border-amber-300'
-                    }`}>
-                      {parcelSettings.parcelEnabled
-                        ? `✓ Parcel Active (+₹${parcelSettings.parcelChargePerItem})`
-                        : 'Global Parcel OFF'}
+                    <span className="text-[10px] font-black text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded uppercase">
+                      Default
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-white border border-emerald-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <div>
-                        <span className="font-bold text-emerald-950 block leading-tight">Normal Service</span>
-                        <span className="text-[10px] text-emerald-800">Available (₹0 fee)</span>
+
+                  {/* Parcel Service: Admin Controlled Toggle */}
+                  {formCategoryStatus.isSnacks ? (
+                    /* Snacks Category: Locked OFF */
+                    <div className="bg-stone-100/80 border border-stone-200/80 p-3 rounded-xl text-xs flex items-center justify-between opacity-70">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-stone-400 shrink-0" />
+                        <div>
+                          <span className="font-bold text-stone-600 block leading-tight">Parcel Service</span>
+                          <span className="text-[10px] text-stone-500">Disabled for Snacks</span>
+                        </div>
                       </div>
+                      <span className="text-[10px] font-bold text-stone-500 bg-stone-200 px-2 py-0.5 rounded uppercase">
+                        Locked
+                      </span>
                     </div>
-                    <div className="bg-white border border-emerald-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
-                      <div className="w-2 h-2 rounded-full bg-amber-500" />
-                      <div>
-                        <span className="font-bold text-emerald-950 block leading-tight">Parcel Service</span>
-                        <span className="text-[10px] text-emerald-800">
-                          {parcelSettings.parcelEnabled
-                            ? `Available (+₹${parcelSettings.parcelChargePerItem}/unit)`
-                            : 'Available when Global Parcel ON'}
+                  ) : (
+                    /* Food Items & Juices: Interactive Toggle */
+                    <div
+                      className={`border p-3 rounded-xl text-xs flex items-center justify-between transition-all ${
+                        formParcelEnabled
+                          ? 'bg-emerald-50/70 border-emerald-300 shadow-2xs'
+                          : 'bg-white border-stone-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                        <div
+                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                            formParcelEnabled ? 'bg-amber-500 animate-pulse' : 'bg-stone-300'
+                          }`}
+                        />
+                        <div className="min-w-0">
+                          <span className="font-bold text-stone-900 block leading-tight truncate">
+                            Parcel Service
+                          </span>
+                          <span className="text-[10px] text-stone-500 block truncate">
+                            {formParcelEnabled
+                              ? `+₹${parcelSettings.parcelChargePerItem} fee per unit`
+                              : 'Disabled for this item'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={formParcelEnabled}
+                          onChange={(e) => setFormParcelEnabled(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-stone-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0b3d2e]"></div>
+                        <span className="ml-2 text-[11px] font-black uppercase text-stone-700 min-w-[28px]">
+                          {formParcelEnabled ? 'ON' : 'OFF'}
                         </span>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-emerald-800 font-medium leading-relaxed">
-                    ✓ <strong>Auto-Configured:</strong> {formCategoryStatus.primaryName || 'Food Items / Juices'} automatically support both Normal and Parcel service. Customers can choose Parcel whenever the global Parcel setting is ON.
-                  </p>
-                  {editingItem && (editingItem.category?.name || '').trim().toLowerCase() === 'snacks' && (
-                    <div className="bg-emerald-100 border border-emerald-300 text-emerald-950 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
-                      <span>Category changed from Snacks: Parcel packaging will become active for this item upon saving.</span>
+                      </label>
                     </div>
                   )}
                 </div>
-              )}
+
+                {/* Explanatory Message */}
+                {formCategoryStatus.isSnacks ? (
+                  <p className="text-[11px] text-stone-500 font-medium leading-relaxed">
+                    ℹ️ <strong>Category Rule:</strong> Snacks are strictly Normal service only. Parcel packaging cannot be enabled for Snacks.
+                  </p>
+                ) : (
+                  <p className="text-[11px] font-medium leading-relaxed text-stone-600">
+                    {formParcelEnabled ? (
+                      <>
+                        ✓ <strong>Customers can choose between Normal and Parcel service.</strong>
+                        {parcelSettings.parcelEnabled ? (
+                          <span className="text-emerald-800 font-semibold block mt-0.5">
+                            Parcel fee of ₹{parcelSettings.parcelChargePerItem} per unit will be applied when selected.
+                          </span>
+                        ) : (
+                          <span className="text-amber-800 font-semibold block mt-0.5">
+                            Note: Global Parcel setting is currently OFF in canteen settings. Customers will see Normal service until global Parcel is enabled.
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        ℹ️ <strong>Customers can order this item as Normal only.</strong> No service selection or parcel fees will appear to customers.
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
@@ -1575,91 +1642,135 @@ const MenuManagement = () => {
               )}
 
               {/* Category-Based Service Options & Parcel Packaging */}
-              {formCategoryStatus.isSnacks ? (
-                /* Snacks Category: Normal Only (No parcel configuration controls) */
-                <div className="bg-stone-50 border border-stone-200/90 rounded-2xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
-                      <Package className="w-3.5 h-3.5 text-stone-500" /> Service Options & Packaging
+              <div className="bg-stone-50 border border-stone-200/90 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-stone-800 flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-stone-600" /> Service Options & Packaging
+                  </span>
+                  {formCategoryStatus.isSnacks ? (
+                    <span className="bg-stone-200 text-stone-700 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
+                      Normal Service Only (Snacks)
                     </span>
-                    <span className="bg-stone-200 text-stone-800 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
-                      Normal Service Only
+                  ) : (
+                    <span
+                      className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase border ${
+                        formParcelEnabled && parcelSettings.parcelEnabled
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : formParcelEnabled && !parcelSettings.parcelEnabled
+                          ? 'bg-amber-100 text-amber-900 border-amber-300'
+                          : 'bg-stone-200 text-stone-700 border-stone-300'
+                      }`}
+                    >
+                      {formParcelEnabled
+                        ? parcelSettings.parcelEnabled
+                          ? `✓ Parcel Active (+₹${parcelSettings.parcelChargePerItem})`
+                          : 'Parcel Enabled (Global Parcel OFF)'
+                        : 'Normal Only'}
                     </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-white border border-stone-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Normal Service: Always Available */}
+                  <div className="bg-white border border-stone-200 p-3 rounded-xl text-xs flex items-center justify-between shadow-2xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
                       <div>
                         <span className="font-bold text-stone-900 block leading-tight">Normal Service</span>
-                        <span className="text-[10px] text-stone-500">Available (Counter / Dine-in)</span>
+                        <span className="text-[10px] text-stone-500">Always Available — ₹0 Parcel Fee</span>
                       </div>
                     </div>
-                    <div className="bg-stone-100/80 border border-stone-200/70 p-2.5 rounded-xl text-xs flex items-center gap-2 opacity-60">
-                      <div className="w-2 h-2 rounded-full bg-stone-400" />
-                      <div>
-                        <span className="font-bold text-stone-600 block leading-tight">Parcel Service</span>
-                        <span className="text-[10px] text-stone-500">Disabled for Snacks</span>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-stone-500 font-medium leading-relaxed">
-                    ℹ️ <strong>Category Rule:</strong> Snacks are strictly Normal service only. Parcel packaging is never offered for Snacks.
-                  </p>
-                  {editingItem && (editingItem.category?.name || '').trim().toLowerCase() !== 'snacks' && (
-                    <div className="bg-amber-100 border border-amber-300 text-amber-950 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
-                      <span>Category changed to Snacks: Parcel packaging will become unavailable for this item upon saving.</span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* Food Items / Juices Category: Normal & Parcel Available */
-                <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-2xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
-                      <Package className="w-3.5 h-3.5 text-emerald-700" /> Service Options & Packaging
-                    </span>
-                    <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase border ${
-                      parcelSettings.parcelEnabled
-                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                        : 'bg-amber-100 text-amber-900 border-amber-300'
-                    }`}>
-                      {parcelSettings.parcelEnabled
-                        ? `✓ Parcel Active (+₹${parcelSettings.parcelChargePerItem})`
-                        : 'Global Parcel OFF'}
+                    <span className="text-[10px] font-black text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded uppercase">
+                      Default
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-white border border-emerald-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <div>
-                        <span className="font-bold text-emerald-950 block leading-tight">Normal Service</span>
-                        <span className="text-[10px] text-emerald-800">Available (₹0 fee)</span>
+
+                  {/* Parcel Service: Admin Controlled Toggle */}
+                  {formCategoryStatus.isSnacks ? (
+                    /* Snacks Category: Locked OFF */
+                    <div className="bg-stone-100/80 border border-stone-200/80 p-3 rounded-xl text-xs flex items-center justify-between opacity-70">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-stone-400 shrink-0" />
+                        <div>
+                          <span className="font-bold text-stone-600 block leading-tight">Parcel Service</span>
+                          <span className="text-[10px] text-stone-500">Disabled for Snacks</span>
+                        </div>
                       </div>
+                      <span className="text-[10px] font-bold text-stone-500 bg-stone-200 px-2 py-0.5 rounded uppercase">
+                        Locked
+                      </span>
                     </div>
-                    <div className="bg-white border border-emerald-200 p-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs">
-                      <div className="w-2 h-2 rounded-full bg-amber-500" />
-                      <div>
-                        <span className="font-bold text-emerald-950 block leading-tight">Parcel Service</span>
-                        <span className="text-[10px] text-emerald-800">
-                          {parcelSettings.parcelEnabled
-                            ? `Available (+₹${parcelSettings.parcelChargePerItem}/unit)`
-                            : 'Available when Global Parcel ON'}
+                  ) : (
+                    /* Food Items & Juices: Interactive Toggle */
+                    <div
+                      className={`border p-3 rounded-xl text-xs flex items-center justify-between transition-all ${
+                        formParcelEnabled
+                          ? 'bg-emerald-50/70 border-emerald-300 shadow-2xs'
+                          : 'bg-white border-stone-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                        <div
+                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                            formParcelEnabled ? 'bg-amber-500 animate-pulse' : 'bg-stone-300'
+                          }`}
+                        />
+                        <div className="min-w-0">
+                          <span className="font-bold text-stone-900 block leading-tight truncate">
+                            Parcel Service
+                          </span>
+                          <span className="text-[10px] text-stone-500 block truncate">
+                            {formParcelEnabled
+                              ? `+₹${parcelSettings.parcelChargePerItem} fee per unit`
+                              : 'Disabled for this item'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={formParcelEnabled}
+                          onChange={(e) => setFormParcelEnabled(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-stone-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0b3d2e]"></div>
+                        <span className="ml-2 text-[11px] font-black uppercase text-stone-700 min-w-[28px]">
+                          {formParcelEnabled ? 'ON' : 'OFF'}
                         </span>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-emerald-800 font-medium leading-relaxed">
-                    ✓ <strong>Auto-Configured:</strong> {formCategoryStatus.primaryName || 'Food Items / Juices'} automatically support both Normal and Parcel service. Customers can choose Parcel whenever the global Parcel setting is ON.
-                  </p>
-                  {editingItem && (editingItem.category?.name || '').trim().toLowerCase() === 'snacks' && (
-                    <div className="bg-emerald-100 border border-emerald-300 text-emerald-950 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
-                      <span>Category changed from Snacks: Parcel packaging will become active for this item upon saving.</span>
+                      </label>
                     </div>
                   )}
                 </div>
-              )}
+
+                {/* Explanatory Message */}
+                {formCategoryStatus.isSnacks ? (
+                  <p className="text-[11px] text-stone-500 font-medium leading-relaxed">
+                    ℹ️ <strong>Category Rule:</strong> Snacks are strictly Normal service only. Parcel packaging cannot be enabled for Snacks.
+                  </p>
+                ) : (
+                  <p className="text-[11px] font-medium leading-relaxed text-stone-600">
+                    {formParcelEnabled ? (
+                      <>
+                        ✓ <strong>Customers can choose between Normal and Parcel service.</strong>
+                        {parcelSettings.parcelEnabled ? (
+                          <span className="text-emerald-800 font-semibold block mt-0.5">
+                            Parcel fee of ₹{parcelSettings.parcelChargePerItem} per unit will be applied when selected.
+                          </span>
+                        ) : (
+                          <span className="text-amber-800 font-semibold block mt-0.5">
+                            Note: Global Parcel setting is currently OFF in canteen settings. Customers will see Normal service until global Parcel is enabled.
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        ℹ️ <strong>Customers can order this item as Normal only.</strong> No service selection or parcel fees will appear to customers.
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">

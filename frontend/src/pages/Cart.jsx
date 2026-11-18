@@ -103,7 +103,7 @@ const Cart = () => {
           variantId: i.variantId || null,
           name: i.name,
           quantity: i.quantity,
-          serviceType: parcelEnabled && i.serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL',
+          serviceType: parcelEnabled && isItemParcelEligible(i) && i.serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL',
         })),
         couponCode: couponsEnabled && coupon ? coupon.code : '',
         paymentMethod: paymentMethod,

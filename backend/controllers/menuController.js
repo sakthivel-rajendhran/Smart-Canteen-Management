@@ -41,7 +41,9 @@ const normalizeMenuItemImage = (item, isList = false) => {
   }
   plain.categories = combined;
   plain.variants = Array.isArray(plain.variants) ? plain.variants : [];
-  plain.parcelEligible = isItemParcelEligible(plain);
+  const eligible = isItemParcelEligible(plain);
+  plain.parcelEligible = eligible;
+  plain.parcelEnabled = eligible;
   return plain;
 };
 
@@ -341,6 +343,8 @@ const createMenuItem = async (req, res) => {
       variants,
       imageUrl,
       imagePublicId,
+      parcelEligible,
+      parcelEnabled,
     } = req.body;
 
     const parsedVariants = parseVariantsInput(variants, []);
@@ -414,14 +418,17 @@ const createMenuItem = async (req, res) => {
     }
 
     // Determine category-based parcel eligibility:
-    // Food Items & Juices: parcelEligible = true (available when global Parcel setting is ON)
-    // Snacks: parcelEligible = false (never available)
+    // Food Items & Juices: Admin controlled (defaults to false if not specified)
+    // Snacks: strictly false (never parcel eligible)
     const allAssignedCatIds = [category, ...normalizedCatIds].filter(Boolean);
     const assignedCatDocs = await Category.find({ _id: { $in: allAssignedCatIds } }).lean();
     const hasSnacksCategory = assignedCatDocs.some(
       (c) => String(c.name || '').trim().toLowerCase() === 'snacks' || c.parcelEligible === false
     );
-    const isParcelEligible = !hasSnacksCategory;
+
+    const rawParcelVal = parcelEnabled !== undefined ? parcelEnabled : parcelEligible;
+    const requestedParcel = rawParcelVal === 'true' || rawParcelVal === true;
+    const finalParcelEligible = !hasSnacksCategory && requestedParcel;
 
     let menuItem;
     try {
@@ -439,7 +446,8 @@ const createMenuItem = async (req, res) => {
         preparationTime: preparationTime ? Number(preparationTime) : 10,
         adminReviewNote: adminReviewNote ? String(adminReviewNote).trim() : '',
         variants: parsedVariants || [],
-        parcelEligible: isParcelEligible,
+        parcelEligible: finalParcelEligible,
+        parcelEnabled: finalParcelEligible,
       });
     } catch (dbError) {
       // Handle orphan cleanup: if upload succeeded but DB save failed, delete from Cloudinary
@@ -501,6 +509,8 @@ const updateMenuItem = async (req, res) => {
       imageUrl,
       imagePublicId,
       removeImage,
+      parcelEligible,
+      parcelEnabled,
     } = req.body;
 
     const menuItem = await MenuItem.findById(req.params.id);
@@ -607,14 +617,24 @@ const updateMenuItem = async (req, res) => {
     if (adminReviewNote !== undefined) menuItem.adminReviewNote = String(adminReviewNote).trim();
 
     // Determine category-based parcel eligibility:
-    // Food Items & Juices: parcelEligible = true (available when global Parcel setting is ON)
-    // Snacks: parcelEligible = false (never available)
+    // Food Items & Juices: Admin controlled
+    // Snacks: strictly false (never parcel eligible)
+    if (parcelEnabled !== undefined || parcelEligible !== undefined) {
+      const rawParcelVal = parcelEnabled !== undefined ? parcelEnabled : parcelEligible;
+      const requestedParcel = rawParcelVal === 'true' || rawParcelVal === true;
+      menuItem.parcelEligible = requestedParcel;
+      menuItem.parcelEnabled = requestedParcel;
+    }
+
     const allAssignedCatIds = [menuItem.category, ...(Array.isArray(menuItem.categories) ? menuItem.categories : [])].filter(Boolean);
     const assignedCatDocs = await Category.find({ _id: { $in: allAssignedCatIds } }).lean();
     const hasSnacksCategory = assignedCatDocs.some(
       (c) => String(c.name || '').trim().toLowerCase() === 'snacks' || c.parcelEligible === false
     );
-    menuItem.parcelEligible = !hasSnacksCategory;
+    if (hasSnacksCategory) {
+      menuItem.parcelEligible = false;
+      menuItem.parcelEnabled = false;
+    }
 
     try {
       await menuItem.save();

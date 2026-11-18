@@ -48,17 +48,27 @@ export const isCategoryParcelEligible = (cat) => {
 };
 
 /**
- * Determines whether a menu item can be ordered as PARCEL based on its assigned categories.
+ * Determines whether a menu item can be ordered as PARCEL:
+ * 1. Admin switch: parcelEligible or parcelEnabled must be explicitly true.
+ * 2. Category rule: Snacks are strictly Normal-only (never parcel eligible).
  */
 export const isItemParcelEligible = (menuItem) => {
   if (!menuItem) return false;
-  if (menuItem.parcelEligible === false) return false;
+
+  // Individual item parcel switch must be explicitly enabled
+  const isEnabled = menuItem.parcelEligible === true || menuItem.parcelEnabled === true;
+  if (!isEnabled) return false;
+
+  // Category restriction: Snacks can NEVER be parcel eligible
   const assignedCats = [
     menuItem.category,
     ...(Array.isArray(menuItem.categories) ? menuItem.categories : []),
   ].filter(Boolean);
-  if (assignedCats.length === 0) return menuItem.parcelEligible !== false;
-  return assignedCats.every((cat) => isCategoryParcelEligible(cat));
+
+  const hasSnacks = assignedCats.some((cat) => !isCategoryParcelEligible(cat));
+  if (hasSnacks) return false;
+
+  return true;
 };
 
 /**
@@ -92,7 +102,7 @@ export const resolveItemParcelPricing = ({
 
   if (normalizedType === 'PARCEL' && !itemParcelEligible) {
     const label = itemName ? `"${itemName}"` : 'this item';
-    const err = new Error(`Parcel option is not available for ${label} (Snacks are Normal-only).`);
+    const err = new Error(`Parcel service is not available for ${label}.`);
     err.statusCode = 400;
     throw err;
   }

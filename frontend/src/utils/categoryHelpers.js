@@ -56,10 +56,12 @@ export const isCategoryParcelEligible = (cat) => {
 
 export const isItemParcelEligible = (item) => {
   if (!item) return false;
-  if (item.parcelEligible === false) return false;
+  const isEnabled = item.parcelEligible === true || item.parcelEnabled === true;
+  if (!isEnabled) return false;
   const cats = getItemCategories(item);
-  if (cats.length === 0) return item.parcelEligible !== false;
-  return cats.every((cat) => isCategoryParcelEligible(cat));
+  const hasSnacks = cats.some((cat) => !isCategoryParcelEligible(cat));
+  if (hasSnacks) return false;
+  return true;
 };
 
 export const syncItemCategoryUpdate = (item, updatedCat) => {

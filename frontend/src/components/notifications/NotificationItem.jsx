@@ -32,7 +32,7 @@ const formatTimeAgo = (dateStr) => {
 const NotificationItem = ({ notification, onCloseDropdown }) => {
   const navigate = useNavigate();
   const { markAsRead, deleteNotification } = useNotifications();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
 
   const isUnread = !notification.read;
   const isHighPriority = notification.priority === 'HIGH';
@@ -40,7 +40,13 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
   const pickupToken = notification.metadata?.pickupToken;
   const notifId = notification._id || notification.id;
 
-  const isAdmin = user?.role === 'admin' || window.location.pathname.startsWith('/admin');
+  const isActualAdmin = Boolean(
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'ADMIN' ||
+    user?.accountType === 'ADMIN' ||
+    window.location.pathname.startsWith('/admin')
+  );
 
   const handleClick = () => {
     if (isUnread && notifId) {
@@ -48,15 +54,22 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
     }
     if (onCloseDropdown) onCloseDropdown();
 
-    if (isAdmin) {
-      const adminLink = notification.metadata?.link;
+    if (isActualAdmin) {
+      // Authenticated Admins must never be navigated to customer-facing pickup pages.
+      // Ready orders or pickup bill notifications direct staff to the Handover counter.
       if (
-        adminLink &&
-        !adminLink.includes('tracker') &&
-        !adminLink.includes('live-tracking') &&
-        !adminLink.includes('handover')
+        notification.type === 'ORDER_READY' ||
+        notification.metadata?.status === 'Pickup Bill' ||
+        notification.metadata?.status === 'Ready'
       ) {
+        navigate('/admin/handover');
+        return;
+      }
+      const adminLink = notification.metadata?.link;
+      if (adminLink && adminLink.startsWith('/admin')) {
         navigate(adminLink);
+      } else {
+        navigate('/admin/live-tracking');
       }
     } else {
       const targetId = notification.metadata?.orderId || notification.order?._id || notification.order;
@@ -160,7 +173,7 @@ const NotificationItem = ({ notification, onCloseDropdown }) => {
           {orderCode ? (
             <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
               <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-primary hover:text-primary-dark truncate max-w-full">
-                <span className="truncate">Pickup / Track</span>
+                <span className="truncate">{isActualAdmin ? 'Verify Handover' : 'Pickup / Track'}</span>
                 <span className="font-mono font-black text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded text-xs shrink-0">
                   #{orderCode}
                 </span>

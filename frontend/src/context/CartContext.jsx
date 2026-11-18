@@ -371,7 +371,7 @@ export const CartProvider = ({ children }) => {
         const syncedCart = cart.map((cartItem) => {
           const dbMatch = menuItems.find((i) => String(i._id) === String(cartItem.menuItem));
           if (!dbMatch) return cartItem;
-          const eligible = dbMatch.parcelEligible !== false;
+          const eligible = isItemParcelEligible(dbMatch);
           const dbVariants = Array.isArray(dbMatch.variants) ? dbMatch.variants : [];
           const matchedVariant = cartItem.variantId
             ? dbVariants.find(
@@ -382,7 +382,7 @@ export const CartProvider = ({ children }) => {
             : null;
           const nextPrice = matchedVariant ? Number(matchedVariant.price) : Number(dbMatch.price);
           const nextLabel = matchedVariant ? matchedVariant.label : cartItem.variantLabel || '';
-          const nextSvc = eligible ? cartItem.serviceType : 'NORMAL';
+          const nextSvc = (parcelEnabled && eligible) ? cartItem.serviceType : 'NORMAL';
 
           if (
             cartItem.parcelEligible !== eligible ||

@@ -322,7 +322,7 @@ const POSBilling = () => {
 
     setCart((prev) => {
       const updated = prev.map((item) => {
-        const eligible = item.parcelEligible !== false && isItemParcelEligible(item);
+        const eligible = isItemParcelEligible(item);
         if (toType === 'PARCEL' && !eligible) return item;
         return item.menuItem === menuItemId &&
           String(item.variantId || '') === targetVar &&
@@ -375,7 +375,7 @@ const POSBilling = () => {
     return Number(
       cart
         .reduce((sum, item) => {
-          const eligible = item.parcelEligible !== false && isItemParcelEligible(item);
+          const eligible = isItemParcelEligible(item);
           return sum + (eligible && (item.serviceType || 'NORMAL') === 'PARCEL' ? perUnit * item.quantity : 0);
         }, 0)
         .toFixed(2)
@@ -844,7 +844,7 @@ const POSBilling = () => {
                 </div>
               ) : (
                 cart.map((item) => {
-                  const itemEligible = item.parcelEligible !== false && isItemParcelEligible(item);
+                  const itemEligible = isItemParcelEligible(item);
                   const canParcel = parcelSettings.parcelEnabled && itemEligible;
                   const svcType =
                     canParcel && item.serviceType === 'PARCEL' ? 'PARCEL' : 'NORMAL';

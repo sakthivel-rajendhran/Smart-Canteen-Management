@@ -9,6 +9,7 @@ import { NotificationProvider } from './context/NotificationContext';
 
 // Route Guards
 import ProtectedRoute from './components/common/ProtectedRoute';
+import CustomerRoute from './components/common/CustomerRoute';
 import AdminRoute from './components/common/AdminRoute';
 
 // Layout Wrappers
@@ -107,9 +108,9 @@ function App() {
                         </ProtectedRoute>
                       } />
                       <Route path="/pickup" element={
-                        <ProtectedRoute>
+                        <CustomerRoute>
                           <Pickup />
-                        </ProtectedRoute>
+                        </CustomerRoute>
                       } />
                       <Route path="/notifications" element={
                         <ProtectedRoute>

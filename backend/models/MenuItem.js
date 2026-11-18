@@ -103,7 +103,12 @@ const menuItemSchema = new mongoose.Schema(
     },
     parcelEligible: {
       type: Boolean,
-      default: true,
+      default: false,
+      index: true,
+    },
+    parcelEnabled: {
+      type: Boolean,
+      default: false,
       index: true,
     },
     variants: {
