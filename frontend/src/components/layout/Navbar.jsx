@@ -25,7 +25,7 @@ import {
 import NotificationBell from '../notifications/NotificationBell';
 
 const Navbar = () => {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout } = useAuth();
   const { cart } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
@@ -154,7 +154,7 @@ const Navbar = () => {
   ];
 
   const renderNavLinks = () => {
-    if (isAdmin) {
+    if (user?.role === 'admin') {
       const getAdminItemClass = (active) =>
         `h-9 min-w-[88px] xl:min-w-[96px] px-2.5 xl:px-3.5 rounded-full text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-all select-none whitespace-nowrap text-center ${
           active
@@ -352,16 +352,16 @@ const Navbar = () => {
         </Link>
 
         {/* Desktop Links (Hidden on mobile) */}
-        <div className={`hidden ${isAdmin ? 'lg:flex' : 'md:flex'} items-center gap-1 xl:gap-1.5`}>
+        <div className={`hidden ${user?.role === 'admin' ? 'lg:flex' : 'md:flex'} items-center gap-1 xl:gap-1.5`}>
           {renderNavLinks()}
         </div>
 
         {/* Mobile Header Menu Button (Hidden on desktop) */}
-        <div className={`${isAdmin ? 'lg:hidden' : 'md:hidden'} flex items-center gap-3`}>
+        <div className={`${user?.role === 'admin' ? 'lg:hidden' : 'md:hidden'} flex items-center gap-3`}>
           {user && (
-            <NotificationBell isAdmin={isAdmin} />
+            <NotificationBell isAdmin={user.role === 'admin'} />
           )}
-          {isAdmin ? (
+          {user?.role === 'admin' || user?.role === 'ADMIN' ? (
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="text-white hover:text-amber transition-all focus:outline-none"
@@ -392,7 +392,7 @@ const Navbar = () => {
       </nav>
 
       {/* Admin Mobile Menu Drawer */}
-      {mobileMenuOpen && isAdmin && (
+      {mobileMenuOpen && (user?.role === 'admin' || user?.role === 'ADMIN') && (
         <div className="lg:hidden fixed inset-0 z-40 bg-primary-darker/95 backdrop-blur-md pt-20 px-6 flex flex-col gap-2.5 overflow-y-auto pb-10">
           {adminPrimaryNavItems.map((item) => (
             <Link
@@ -487,7 +487,7 @@ const Navbar = () => {
       )}
 
       {/* Customer Mobile Bottom Navigation: Visible ONLY when authenticated (Hidden on public landing page & admin) */}
-      {Boolean(user && !isAdmin) && (
+      {Boolean(user && user.role !== 'admin' && user.role !== 'ADMIN') && (
         <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#072419] border-t-2 border-amber/40 z-40 min-h-[68px] pb-[calc(6px+env(safe-area-inset-bottom,0px))] pt-1.5 px-1 shadow-[0_-8px_25px_rgba(0,0,0,0.6)] flex items-center justify-around select-none">
           {studentNavItems.map((item) => {
             const active = isActive(item.path);

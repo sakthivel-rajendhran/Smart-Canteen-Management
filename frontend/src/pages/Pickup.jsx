@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
@@ -67,8 +67,7 @@ const STATUS_CONFIG = {
 };
 
 const Pickup = () => {
-  const { user, isAdmin } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -76,22 +75,9 @@ const Pickup = () => {
 
   const { socket } = useSocket();
 
-  // Defense-in-depth: If an admin user directly lands here, redirect to Admin Handover immediately
   useEffect(() => {
-    if (isAdmin) {
-      navigate('/admin/handover', { replace: true });
-    }
-  }, [isAdmin, navigate]);
-
-  useEffect(() => {
-    if (!isAdmin) {
-      fetchMyOrders();
-    }
-  }, [isAdmin]);
-
-  if (isAdmin) {
-    return null;
-  }
+    fetchMyOrders();
+  }, []);
 
   // Real-time synchronization for order status transitions
   useEffect(() => {

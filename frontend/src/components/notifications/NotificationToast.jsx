@@ -6,16 +6,10 @@ import { useAuth } from '../../context/AuthContext';
 
 const NotificationToast = () => {
   const { toasts, dismissToast } = useNotifications();
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
-  const isActualAdmin = Boolean(
-    isAdmin ||
-    user?.role === 'admin' ||
-    user?.role === 'ADMIN' ||
-    user?.accountType === 'ADMIN' ||
-    window.location.pathname.startsWith('/admin')
-  );
+  const isAdmin = user?.role === 'admin' || window.location.pathname.startsWith('/admin');
 
   if (!toasts || toasts.length === 0) return null;
 
@@ -29,11 +23,9 @@ const NotificationToast = () => {
 
         const handleAction = () => {
           dismissToast(toast.id);
-          // For admin: do not redirect to customer tracker
-          if (!isActualAdmin && (toast.orderId || toast.orderCode)) {
+          // For admin: do not redirect to tracker
+          if (!isAdmin && (toast.orderId || toast.orderCode)) {
             navigate(`/tracker/${toast.orderId || toast.orderCode}`);
-          } else if (isActualAdmin) {
-            navigate('/admin/handover');
           }
         };
 
