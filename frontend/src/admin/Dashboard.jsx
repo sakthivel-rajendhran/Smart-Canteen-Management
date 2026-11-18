@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import API from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { 
   TrendingUp, 
   ShoppingBag, 
@@ -18,7 +19,8 @@ import {
   Activity,
   Zap,
   CheckCheck,
-  Receipt
+  Receipt,
+  LogIn
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -35,6 +37,8 @@ import {
 } from 'recharts';
 
 const Dashboard = () => {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
   const [overview, setOverview] = useState({ totalOrders: 0, totalRevenue: 0, statusBreakdown: {} });
   const [revenueData, setRevenueData] = useState([]);
   const [popularItems, setPopularItems] = useState([]);
@@ -56,24 +60,66 @@ const Dashboard = () => {
       }
       setError('');
       
-      const [overRes, revRes, popRes, payRes] = await Promise.all([
+      const results = await Promise.allSettled([
         API.get('/analytics/overview'),
         API.get('/analytics/revenue'),
         API.get('/analytics/popular-items'),
         API.get('/analytics/payments')
       ]);
 
-      if (overRes.data?.success) setOverview(overRes.data.data);
-      if (revRes.data?.success) setRevenueData(revRes.data.data);
-      if (popRes.data?.success) setPopularItems(popRes.data.data);
-      if (payRes.data?.success) {
-        // Map backend details to Recharts friendly format
-        const formattedPayments = payRes.data.data.map(item => ({
-          name: item._id === 'cod' ? 'Cash Counter' : 'Online Razorpay',
+      const [overRes, revRes, popRes, payRes] = results;
+
+      // Check for authentication failures (401 or 403)
+      const authError = results.find(
+        (r) =>
+          r.status === 'rejected' &&
+          (r.reason?.response?.status === 401 || r.reason?.response?.status === 403)
+      );
+
+      if (authError) {
+        const msg =
+          authError.reason?.response?.data?.message ||
+          'Your admin session has expired or authorization is required. Please sign in again.';
+        setError(msg);
+        return;
+      }
+
+      let hasData = false;
+
+      if (overRes.status === 'fulfilled' && overRes.value.data?.success) {
+        setOverview(overRes.value.data.data);
+        hasData = true;
+      }
+
+      if (revRes.status === 'fulfilled' && revRes.value.data?.success) {
+        setRevenueData(revRes.value.data.data || []);
+      }
+
+      if (popRes.status === 'fulfilled' && popRes.value.data?.success) {
+        setPopularItems(popRes.value.data.data || []);
+      }
+
+      if (payRes.status === 'fulfilled' && payRes.value.data?.success) {
+        const rawPayments = payRes.value.data.data || [];
+        const formattedPayments = rawPayments.map((item) => ({
+          name:
+            item._id === 'Cash Counter' || item._id === 'cash' || item._id === 'cod'
+              ? 'Cash Counter'
+              : 'Online Razorpay',
           value: item.count,
-          revenue: item.revenue
+          revenue: item.revenue || 0,
         }));
         setPaymentsData(formattedPayments);
+      }
+
+      // If all endpoints failed due to network / server down
+      if (!hasData && results.every((r) => r.status === 'rejected')) {
+        const firstErr = results.find((r) => r.status === 'rejected')?.reason;
+        setError(
+          firstErr?.response?.data?.message ||
+            firstErr?.message ||
+            'Failed to fetch analytics statistics. Please check server connection.'
+        );
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch analytics statistics.');
@@ -87,7 +133,10 @@ const Dashboard = () => {
 
   const pendingCount = (overview.statusBreakdown?.Placed || 0) + (overview.statusBreakdown?.Confirmed || 0);
   const preparingCount = overview.statusBreakdown?.Preparing || 0;
-  const readyCount = overview.statusBreakdown?.Ready || 0;
+  const readyCount =
+    (overview.statusBreakdown?.Ready || 0) +
+    (overview.statusBreakdown?.['Pickup Bill'] || 0) +
+    (overview.statusBreakdown?.['Handover Bill'] || 0);
 
   // Custom Glassmorphic Tooltip for Recharts
   const CustomTooltip = ({ active, payload, label, prefix = '' }) => {
@@ -118,19 +167,42 @@ const Dashboard = () => {
   }
 
   if (error) {
+    const isSessionExpired =
+      error.toLowerCase().includes('authorized') ||
+      error.toLowerCase().includes('token') ||
+      error.toLowerCase().includes('access denied') ||
+      error.toLowerCase().includes('session') ||
+      error.toLowerCase().includes('jwt');
+
     return (
       <div className="max-w-xl mx-auto px-6 py-16 text-center bg-white/70 backdrop-blur-md border border-white/80 rounded-3xl mt-12 shadow-xl">
         <div className="w-16 h-16 bg-red-50 border border-red-200 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-inner">
           <AlertCircle className="w-8 h-8 text-red-500" />
         </div>
-        <h3 className="font-outfit font-black text-2xl text-primary-dark mb-2">Analytics Sync Error</h3>
+        <h3 className="font-outfit font-black text-2xl text-primary-dark mb-2">
+          {isSessionExpired ? 'Admin Session Expired' : 'Analytics Sync Error'}
+        </h3>
         <p className="text-muted text-sm mb-6 leading-relaxed">{error}</p>
-        <button 
-          onClick={() => fetchDashboardAnalytics(true)} 
-          className="bg-primary hover:bg-primary-dark text-white font-bold px-7 py-3 rounded-xl transition-all shadow-md active:scale-95"
-        >
-          Retry Connection
-        </button>
+        <div className="flex items-center justify-center gap-3">
+          {isSessionExpired ? (
+            <button
+              onClick={() => {
+                logout();
+                navigate('/login');
+              }}
+              className="bg-primary hover:bg-primary-dark text-white font-bold px-7 py-3 rounded-xl transition-all shadow-md active:scale-95 flex items-center gap-2 mx-auto"
+            >
+              <LogIn className="w-4 h-4" /> Sign In Again
+            </button>
+          ) : (
+            <button
+              onClick={() => fetchDashboardAnalytics(true)}
+              className="bg-primary hover:bg-primary-dark text-white font-bold px-7 py-3 rounded-xl transition-all shadow-md active:scale-95"
+            >
+              Retry Connection
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -387,6 +459,8 @@ const Dashboard = () => {
               else if (key === 'Confirmed') { pillColor = 'bg-blue-50 text-blue-700'; progressColor = 'bg-blue-500'; }
               else if (key === 'Preparing') { pillColor = 'bg-amber-light text-amber-dark'; progressColor = 'bg-amber'; }
               else if (key === 'Ready') { pillColor = 'bg-green-50 text-green-700'; progressColor = 'bg-green-600'; }
+              else if (key === 'Pickup Bill') { pillColor = 'bg-purple-50 text-purple-700'; progressColor = 'bg-purple-500'; }
+              else if (key === 'Handover Bill') { pillColor = 'bg-teal-50 text-teal-700'; progressColor = 'bg-teal-600'; }
               else if (key === 'Completed') { pillColor = 'bg-green-100 text-green-900'; progressColor = 'bg-primary-dark'; }
               else if (key === 'Cancelled') { pillColor = 'bg-red-50 text-red-700'; progressColor = 'bg-red-500'; }
 

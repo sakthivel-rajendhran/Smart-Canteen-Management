@@ -130,6 +130,10 @@ API.interceptors.response.use(
       }
     }
 
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('drs:auth-expired', { detail: error.response?.data }));
+    }
+
     if (!isSilent) {
       handleRequestFinish();
     }

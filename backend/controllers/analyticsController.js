@@ -62,7 +62,16 @@ const getAnalyticsOverview = async (req, res) => {
     const todayRevenue = todayStats.length > 0 ? todayStats[0].todayRevenue : 0;
     const todayOrders = todayStats.length > 0 ? todayStats[0].todayOrders : 0;
 
-    const statusMap = { Placed: 0, Confirmed: 0, Preparing: 0, Ready: 0, Completed: 0, Cancelled: 0 };
+    const statusMap = {
+      Placed: 0,
+      Confirmed: 0,
+      Preparing: 0,
+      Ready: 0,
+      'Pickup Bill': 0,
+      'Handover Bill': 0,
+      Completed: 0,
+      Cancelled: 0,
+    };
     statusCounts.forEach((item) => {
       if (statusMap[item._id] !== undefined) {
         statusMap[item._id] = item.count;
@@ -104,14 +113,20 @@ const getRevenueTrends = async (req, res) => {
     const revenueByDay = await Order.aggregate([
       {
         $match: {
-          createdAt: { $gte: sevenDaysAgo },
+          createdAt: { $gte: sevenDaysAgo, $exists: true, $type: 'date' },
           status: { $ne: 'Cancelled' },
         },
       },
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-          revenue: { $sum: '$total' },
+          _id: {
+            $dateToString: {
+              format: '%Y-%m-%d',
+              date: '$createdAt',
+              timezone: 'Asia/Kolkata',
+            },
+          },
+          revenue: { $sum: { $ifNull: ['$total', 0] } },
           orders: { $sum: 1 },
         },
       },
@@ -142,9 +157,16 @@ const getPopularItems = async (req, res) => {
       { $unwind: '$items' },
       {
         $group: {
-          _id: '$items.name',
-          quantity: { $sum: '$items.quantity' },
-          revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          _id: { $ifNull: ['$items.name', 'Unnamed Item'] },
+          quantity: { $sum: { $ifNull: ['$items.quantity', 1] } },
+          revenue: {
+            $sum: {
+              $multiply: [
+                { $ifNull: ['$items.price', 0] },
+                { $ifNull: ['$items.quantity', 1] },
+              ],
+            },
+          },
         },
       },
       { $sort: { quantity: -1 } },
@@ -178,11 +200,23 @@ const getPaymentMethodStats = async (req, res) => {
       },
       {
         $group: {
-          _id: '$paymentMethod',
+          _id: {
+            $cond: [
+              {
+                $in: [
+                  { $toLower: { $ifNull: ['$paymentMethod', 'cash'] } },
+                  ['cash', 'cod', 'counter'],
+                ],
+              },
+              'Cash Counter',
+              'Online Razorpay',
+            ],
+          },
           count: { $sum: 1 },
-          revenue: { $sum: '$total' },
+          revenue: { $sum: { $ifNull: ['$total', 0] } },
         },
       },
+      { $sort: { count: -1 } },
     ]);
 
     const responsePayload = { success: true, data: paymentMethods };

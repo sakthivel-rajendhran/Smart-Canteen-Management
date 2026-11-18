@@ -76,6 +76,18 @@ const allowedOrigins = [
 const isOriginAllowed = (origin) => {
   if (!origin) return true; // Server-to-server or tools (curl/postman)
   if (allowedOrigins.includes(origin)) return true;
+  // Allow all Vercel domains for smart-canteen-management (preview and production)
+  try {
+    const parsed = new URL(origin);
+    if (
+      parsed.hostname.endsWith('.vercel.app') &&
+      (parsed.hostname.includes('smart-canteen-management') ||
+       parsed.hostname.includes('canteen') ||
+       parsed.hostname.includes('drs'))
+    ) {
+      return true;
+    }
+  } catch (e) {}
   if (
     process.env.NODE_ENV !== 'production' &&
     (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))

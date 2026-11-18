@@ -13,7 +13,13 @@ const AdminRoute = ({ children }) => {
     );
   }
 
-  if (!user || user.role !== 'admin') {
+  const isAdmin =
+    user &&
+    (user.role === 'admin' ||
+      user.role === 'ADMIN' ||
+      user.accountType === 'ADMIN');
+
+  if (!isAdmin) {
     return <Navigate to="/login" replace />;
   }
 

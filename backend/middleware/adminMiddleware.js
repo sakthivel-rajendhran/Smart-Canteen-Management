@@ -1,5 +1,10 @@
 const adminOnly = (req, res, next) => {
-  if (req.user && (req.user.role === 'admin' || req.user.role === 'ADMIN')) {
+  if (
+    req.user &&
+    (req.user.role === 'admin' ||
+      req.user.role === 'ADMIN' ||
+      req.user.accountType === 'ADMIN')
+  ) {
     next();
   } else {
     res.status(403);
