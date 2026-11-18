@@ -5,6 +5,7 @@ import {
   getHandoverOrders,
   verifyAndHandoverOrder,
   lookupOrderForVerification,
+  searchHandoverOrders,
   getBillArchive,
   getBillById,
   getRetentionSettings,
@@ -27,6 +28,8 @@ router.post('/pos/orders', createWalkInOrder);
 // Ready for Pickup Queue & Handover Management
 router.get('/pos/ready-orders', getReadyOrders);
 router.get('/pos/handover-orders', getHandoverOrders);
+router.get('/pos/handover-search', searchHandoverOrders);
+router.get('/handover/search', searchHandoverOrders);
 router.get('/pos/verify-lookup', lookupOrderForVerification);
 router.post('/pos/verify-pickup', verifyAndHandoverOrder);
 router.post('/orders/:id/verify-pickup', verifyAndHandoverOrder);

@@ -429,6 +429,101 @@ export const lookupOrderForVerification = async (req, res) => {
   }
 };
 
+// @desc    Live Pickup Token & Order ID Search for Handover Counter
+// @route   GET /api/admin/handover/search
+// @access  Private/Admin
+export const searchHandoverOrders = async (req, res) => {
+  try {
+    const rawQuery = req.query.q || req.query.token || req.query.search || '';
+    const term = String(rawQuery).trim();
+
+    if (!term) {
+      return res.json({
+        success: true,
+        message: 'Handover search completed',
+        count: 0,
+        data: [],
+      });
+    }
+
+    const cleanToken = term.replace(/^#/, '');
+    const isObjectId = mongoose.Types.ObjectId.isValid(cleanToken);
+    const escapedTerm = cleanToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escapedTerm, 'i');
+
+    // Also match registered student/staff users by name, phone, registerNumber, staffId
+    const matchedUsers = await User.find({
+      $or: [
+        { name: regex },
+        { phone: regex },
+        { 'studentDetails.registerNumber': regex },
+        { 'staffDetails.staffId': regex },
+      ],
+    }).select('_id').limit(20).lean();
+    const matchedUserIds = matchedUsers.map((u) => u._id);
+
+    const searchConditions = [
+      { pickupToken: regex },
+      { orderCode: regex },
+      { pickupSecret: regex },
+      { 'walkInCustomer.name': regex },
+      { 'walkInCustomer.phone': regex },
+    ];
+
+    if (matchedUserIds.length > 0) {
+      searchConditions.push({ user: { $in: matchedUserIds } });
+    }
+
+    if (isObjectId) {
+      searchConditions.unshift({ _id: cleanToken });
+    }
+
+    const orders = await Order.find({ $or: searchConditions })
+      .populate('user', 'name email phone role accountType studentDetails staffDetails')
+      .populate('cashier', 'name')
+      .populate('handoverVerifiedBy', 'name email role')
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    const data = orders.map((order) => {
+      let eligibility = 'eligible';
+      let eligibilityMessage = 'Order verified and ready for physical food handover.';
+
+      if (order.status === 'Handover Bill' || order.status === 'Completed' || order.handoverVerified) {
+        eligibility = 'already_handed_over';
+        const time = order.completedAt || order.handoverVerifiedAt
+          ? new Date(order.completedAt || order.handoverVerifiedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+          : 'earlier';
+        const verifierName = order.handoverVerifiedBy?.name || 'Staff';
+        eligibilityMessage = `Already collected at ${time} by ${verifierName}. Do not hand over food again.`;
+      } else if (order.status === 'Cancelled') {
+        eligibility = 'cancelled';
+        eligibilityMessage = `Order #${order.orderCode} was cancelled and cannot be handed over.`;
+      } else if (['Placed', 'Confirmed', 'Preparing'].includes(order.status)) {
+        eligibility = 'not_ready';
+        eligibilityMessage = `In kitchen status "${order.status}". Not yet marked Ready for collection.`;
+      }
+
+      return {
+        ...order,
+        eligibility,
+        eligibilityMessage,
+      };
+    });
+
+    res.json({
+      success: true,
+      message: 'Handover search completed',
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error('Error in searchHandoverOrders:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // @desc    Get All Orders Ready for Pickup (Legacy alias)
 // @route   GET /api/admin/pos/ready-orders
 // @access  Private/Admin
